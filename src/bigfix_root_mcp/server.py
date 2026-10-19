@@ -919,15 +919,15 @@ if QNA_ENABLED:
         return {"path": path, "added": added}
 
     @mcp.tool
-    @bes_errors("list_qna_targets")
-    def list_qna_targets() -> dict:
-        """List targets available to evaluate_client_relevance_qna.
+    @bes_errors("qna_list_targets")
+    def qna_list_targets() -> dict:
+        """List targets available to qna_eval_client_relevance.
 
         inventory_path is the inventory file in use: BIGFIX_QNA_INVENTORY
         when the server sets it, else the default search
         (~/.bigfix/remote_clients.toml, then the all-users config directory);
         null when none was found. A run that names no targets uses every
-        inventory host. auto_discovery says whether discover_qna_targets is
+        inventory host. auto_discovery says whether qna_discover_targets is
         available (it probes local qna, container images and
         developer.bigfix.com, and adds what works to
         ~/.bigfix/remote_clients.toml); auto_discovery_pending says no
@@ -946,8 +946,8 @@ if QNA_ENABLED:
         }
 
     @mcp.tool
-    @bes_errors("evaluate_client_relevance_qna")
-    async def evaluate_client_relevance_qna(
+    @bes_errors("qna_eval_client_relevance")
+    async def qna_eval_client_relevance(
         relevance: Annotated[
             str,
             Field(description="Client relevance to evaluate with qna on each target."),
@@ -957,7 +957,7 @@ if QNA_ENABLED:
             list[str] | None,
             Field(
                 description=(
-                    "Names from the server's qna inventory (see list_qna_targets). "
+                    "Names from the server's qna inventory (see qna_list_targets). "
                     "Leave both this and container_images empty to run on every "
                     "inventory host."
                 )
@@ -1002,10 +1002,10 @@ if QNA_ENABLED:
 
         With no inventory_targets or container_images, it runs on every
         inventory host (qna only reads). When no inventory file exists yet
-        (list_qna_targets: auto_discovery_pending), such a run first
+        (qna_list_targets: auto_discovery_pending), such a run first
         discovers what works on the server's host and records it in
         ~/.bigfix/remote_clients.toml; once the file exists, discovery runs
-        only through discover_qna_targets. The payload's auto_discovery says
+        only through qna_discover_targets. The payload's auto_discovery says
         what was added. A discovering run can take minutes.
 
         Per-target failures come back as result rows with error_kind
@@ -1022,7 +1022,7 @@ if QNA_ENABLED:
                     "no targets: qna auto-discovery found nothing that works on this "
                     "server; pass container_images, or add hosts to "
                     f"{discovered['path'] or 'the inventory'} by hand, or fix what "
-                    "kept discovery from finding any and run discover_qna_targets."
+                    "kept discovery from finding any and run qna_discover_targets."
                 )
         targets = qna.resolve_targets(inventory_targets, container_images)
         timeout_seconds = max(1, min(timeout_seconds, qna.MAX_QNA_TIMEOUT_SECONDS))
@@ -1069,8 +1069,8 @@ if QNA_ENABLED:
 if QNA_ENABLED and qna.discovery_allowed():
 
     @mcp.tool
-    @bes_errors("discover_qna_targets")
-    async def discover_qna_targets(ctx: Context) -> dict:
+    @bes_errors("qna_discover_targets")
+    async def qna_discover_targets(ctx: Context) -> dict:
         """Find qna targets that work on the server's host and add them to the
         inventory, like the bigfix-remote-client-relevance CLI's
         --auto-discovery. Evaluates nothing.
@@ -1079,8 +1079,8 @@ if QNA_ENABLED and qna.discovery_allowed():
         images and developer.bigfix.com, then adds what works and is not
         already listed to ~/.bigfix/remote_clients.toml. Never uses SSH
         discovery and never prompts. Slow: it can take minutes. Use it when
-        list_qna_targets shows no (or too few) inventory hosts; a run of
-        evaluate_client_relevance_qna naming no targets only discovers by
+        qna_list_targets shows no (or too few) inventory hosts; a run of
+        qna_eval_client_relevance naming no targets only discovers by
         itself when no inventory file exists yet.
 
         Returns path (the inventory written), added (new host names) and

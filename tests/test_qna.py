@@ -19,7 +19,7 @@ from fastmcp.exceptions import ToolError
 
 from bigfix_root_mcp import qna, server
 
-QNA_TOOLS = {"evaluate_client_relevance_qna", "list_qna_targets", "discover_qna_targets"}
+QNA_TOOLS = {"qna_eval_client_relevance", "qna_list_targets", "qna_discover_targets"}
 PKG = "bigfix_remote_client_relevance"
 
 
@@ -362,7 +362,7 @@ class TestAutoDiscovery:
             await qna.run_discovery()
 
 
-class TestEvaluateClientRelevanceQna:
+class TestQnaEvalClientRelevance:
     """Runs against a server module reloaded with the fake package importable."""
 
     async def test_happy_path_shapes_results(self, gated, fake_pkg):
@@ -376,7 +376,7 @@ class TestEvaluateClientRelevanceQna:
         ]
         result = await call(
             gated,
-            "evaluate_client_relevance_qna",
+            "qna_eval_client_relevance",
             {
                 "relevance": "name of operating system",
                 "container_images": ["ubuntu:22.04", "debian:12"],
@@ -392,7 +392,7 @@ class TestEvaluateClientRelevanceQna:
         with pytest.raises(ToolError, match="image"):
             await call(
                 gated,
-                "evaluate_client_relevance_qna",
+                "qna_eval_client_relevance",
                 {"relevance": "true", "container_images": ["ubuntu; rm -rf /"]},
             )
         assert not [c for c in fake_pkg.calls if c[0] == "evaluate"]
@@ -401,7 +401,7 @@ class TestEvaluateClientRelevanceQna:
         fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
         await call(
             gated,
-            "evaluate_client_relevance_qna",
+            "qna_eval_client_relevance",
             {
                 "relevance": "true",
                 "container_images": ["ubuntu:22.04"],
@@ -417,7 +417,7 @@ class TestEvaluateClientRelevanceQna:
         fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
         await call(
             gated,
-            "evaluate_client_relevance_qna",
+            "qna_eval_client_relevance",
             {
                 "relevance": "true",
                 "container_images": ["ubuntu:22.04"],
@@ -431,7 +431,7 @@ class TestEvaluateClientRelevanceQna:
         fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
         result = await call(
             gated,
-            "evaluate_client_relevance_qna",
+            "qna_eval_client_relevance",
             {
                 "relevance": "namez of operating systemz",
                 "container_images": ["ubuntu:22.04"],
@@ -444,18 +444,18 @@ class TestEvaluateClientRelevanceQna:
         with caplog.at_level("INFO"):
             await call(
                 gated,
-                "evaluate_client_relevance_qna",
+                "qna_eval_client_relevance",
                 {"relevance": "true", "container_images": ["ubuntu:22.04"]},
             )
         audit = [r for r in caplog.records if "BIGFIX QNA" in r.getMessage()]
         assert audit, "every qna run must leave an audit line"
 
-    async def test_list_qna_targets_reports_inventory_and_policy(
+    async def test_qna_list_targets_reports_inventory_and_policy(
         self, gated, fake_pkg, monkeypatch
     ):
         monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
         fake_pkg.inventory = [fake_pkg.Target(kind="ssh", name="mac-test")]
-        result = await call(gated, "list_qna_targets")
+        result = await call(gated, "qna_list_targets")
         assert result.data["containers_allowed"] is True
         assert result.data["inventory"] == [
             {"name": "mac-test", "kind": "ssh", "label": "mac-test"}
@@ -465,13 +465,13 @@ class TestEvaluateClientRelevanceQna:
         assert result.data["auto_discovery"] is False
         assert result.data["auto_discovery_pending"] is False
 
-    async def test_list_qna_targets_reports_the_default_inventory(
+    async def test_qna_list_targets_reports_the_default_inventory(
         self, gated, fake_pkg, monkeypatch
     ):
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
         fake_pkg.default_inventory = USER_INVENTORY
         fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
-        result = await call(gated, "list_qna_targets")
+        result = await call(gated, "qna_list_targets")
         assert result.data["inventory_path"] == USER_INVENTORY
         assert result.data["inventory_source"] == "default search"
         assert result.data["auto_discovery"] is True
@@ -490,7 +490,7 @@ class TestEvaluateClientRelevanceQna:
             fake_pkg.FakeResult(host="local"),
         ]
         with caplog.at_level("INFO"):
-            result = await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+            result = await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert result.data["target_count"] == 2
         evaluate = called(fake_pkg, "evaluate")[0]
         assert evaluate[2] == ("mac-test", "local")
@@ -502,7 +502,7 @@ class TestEvaluateClientRelevanceQna:
         fake_pkg.discovered = [fake_pkg.Target(kind="local", name="local")]
         fake_pkg.scripted_results = [fake_pkg.FakeResult(host="local")]
         with caplog.at_level("INFO"):
-            result = await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+            result = await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert called(fake_pkg, "run_auto_discovery") == [("run_auto_discovery", USER_INVENTORY)]
         assert called(fake_pkg, "evaluate")[0][2] == ("local",)
         assert result.data["auto_discovery"] == {"path": USER_INVENTORY, "added": ["local"]}
@@ -516,26 +516,26 @@ class TestEvaluateClientRelevanceQna:
         placeholder.write_text("# no hosts found yet\n")
         fake_pkg.default_inventory = str(placeholder)
         fake_pkg.inventory_error = fake_pkg.InventoryError("defines no [hosts.*] entries")
-        with pytest.raises(ToolError, match="discover_qna_targets"):
-            await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+        with pytest.raises(ToolError, match="qna_discover_targets"):
+            await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert not called(fake_pkg, "run_auto_discovery")
 
     async def test_list_reports_pending_first_run_discovery(self, gated, fake_pkg):
-        result = await call(gated, "list_qna_targets")
+        result = await call(gated, "qna_list_targets")
         assert result.data["inventory_path"] is None
         assert result.data["auto_discovery_pending"] is True
         assert not called(fake_pkg, "run_auto_discovery")
 
     async def test_discovery_finding_nothing_is_a_clear_error(self, gated, fake_pkg):
         with pytest.raises(ToolError, match="auto-discovery"):
-            await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+            await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert not called(fake_pkg, "evaluate")
 
     async def test_explicit_targets_never_run_discovery(self, gated, fake_pkg):
         fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
         await call(
             gated,
-            "evaluate_client_relevance_qna",
+            "qna_eval_client_relevance",
             {"relevance": "true", "container_images": ["ubuntu:22.04"]},
         )
         assert not called(fake_pkg, "run_auto_discovery")
@@ -545,11 +545,11 @@ class TestEvaluateClientRelevanceQna:
     ):
         monkeypatch.setenv("BIGFIX_QNA_AUTO_DISCOVERY", "0")
         with pytest.raises(ToolError, match="target"):
-            await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+            await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert not called(fake_pkg, "run_auto_discovery")
 
 
-class TestDiscoverQnaTargets:
+class TestQnaDiscoverTargets:
     """The one way to ask for discovery once an inventory file exists."""
 
     async def test_adds_missing_hosts_to_an_existing_inventory(self, gated, fake_pkg, caplog):
@@ -561,7 +561,7 @@ class TestDiscoverQnaTargets:
             fake_pkg.Target(kind="local", name="local"),
         ]
         with caplog.at_level("INFO"):
-            result = await call(gated, "discover_qna_targets")
+            result = await call(gated, "qna_discover_targets")
         assert called(fake_pkg, "run_auto_discovery") == [("run_auto_discovery", USER_INVENTORY)]
         assert result.data["path"] == USER_INVENTORY
         assert result.data["added"] == ["mac-test", "local"]
@@ -573,7 +573,7 @@ class TestDiscoverQnaTargets:
     async def test_refused_with_a_pinned_inventory(self, gated, fake_pkg, monkeypatch):
         monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
         with pytest.raises(ToolError, match="BIGFIX_QNA_INVENTORY"):
-            await call(gated, "discover_qna_targets")
+            await call(gated, "qna_discover_targets")
         assert not called(fake_pkg, "run_auto_discovery")
 
     @pytest.mark.parametrize(
@@ -587,8 +587,8 @@ class TestDiscoverQnaTargets:
         try:
             async with Client(reloaded.mcp) as client:
                 tools = {tool.name for tool in await client.list_tools()}
-            assert "evaluate_client_relevance_qna" in tools
-            assert "discover_qna_targets" not in tools
+            assert "qna_eval_client_relevance" in tools
+            assert "qna_discover_targets" not in tools
         finally:
             monkeypatch.undo()  # drops the fake package too
             importlib.reload(server)
@@ -597,7 +597,7 @@ class TestDiscoverQnaTargets:
         """Evaluation stays a read; discovering is its own tool call."""
         async with Client(gated.mcp) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
-        params = tools["evaluate_client_relevance_qna"].input_schema["properties"]
+        params = tools["qna_eval_client_relevance"].input_schema["properties"]
         assert "auto_discovery" not in params
 
 

@@ -62,9 +62,9 @@ Registered by default; absent when every target source is disabled - see
 
 | Tool | Purpose |
 | --- | --- |
-| `evaluate_client_relevance_qna` | Evaluate client relevance with the `qna` binary on containers or inventory hosts (every inventory host when none is named) - about a second per warm run. Never touches the BigFix deployment. |
-| `list_qna_targets` | List the inventory targets, which inventory file is in use, whether auto-discovery may run, and whether container images are allowed. |
-| `discover_qna_targets` | Find qna targets that work on the server's host and add them to `~/.bigfix/remote_clients.toml`, like the CLI's `--auto-discovery`. Registered only with the default inventory. |
+| `qna_eval_client_relevance` | Evaluate client relevance with the `qna` binary on containers or inventory hosts (every inventory host when none is named) - about a second per warm run. Never touches the BigFix deployment. |
+| `qna_list_targets` | List the inventory targets, which inventory file is in use, whether auto-discovery may run, and whether container images are allowed. |
+| `qna_discover_targets` | Find qna targets that work on the server's host and add them to `~/.bigfix/remote_clients.toml`, like the CLI's `--auto-discovery`. Registered only with the default inventory. |
 
 ### Write tools (opt-in)
 
@@ -277,7 +277,7 @@ Explorer", so both setups evaluate the query exactly as written.
 ## qna evaluation
 
 [bigfix-remote-client-relevance](https://github.com/jgstew/bigfix-remote-client-relevance)
-is a base dependency, so `evaluate_client_relevance_qna` / `list_qna_targets`
+is a base dependency, so `qna_eval_client_relevance` / `qna_list_targets`
 are registered by default; they are absent only when both target sources are
 off (`BIGFIX_QNA_INVENTORY=0` and `BIGFIX_QNA_CONTAINERS=0`). The `[qna]`
 extra still exists so older install commands keep working, but adds nothing.
@@ -306,7 +306,7 @@ Targets are deliberately constrained:
   `./remote_clients.toml`, since an MCP server's working directory is wherever
   its client launched it. `BIGFIX_QNA_INVENTORY=0` turns the inventory off.
   The MCP client can pick entries by name but can never supply ssh hosts,
-  users, or `become` flags of its own. `list_qna_targets` shows the file in
+  users, or `become` flags of its own. `qna_list_targets` shows the file in
   use.
 - **No targets named** means every inventory host, as with the CLI (qna only
   reads), up to 20 per run. An `online_evaluator` entry sends the client
@@ -318,7 +318,7 @@ Targets are deliberately constrained:
   `~/.bigfix/remote_clients.toml`; it can take minutes. As with the CLI, it
   runs by itself only on a first run: one that names no targets when no
   inventory file exists. Once the file exists, even with no hosts, it runs
-  only when the `discover_qna_targets` tool is called (the CLI's
+  only when the `qna_discover_targets` tool is called (the CLI's
   `--auto-discovery`). With a `BIGFIX_QNA_INVENTORY` path (that file is the
   admin's) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and that tool is
   not registered. It never uses the interactive SSH discovery and never

@@ -221,7 +221,7 @@ root server is exactly why findings stay advisory.
 
 ## qna evaluation gate (bigfix-remote-client-relevance)
 
-`evaluate_client_relevance_qna` runs relevance through the `qna` binary on
+`qna_eval_client_relevance` runs relevance through the `qna` binary on
 lab targets - it never touches the BigFix deployment (the package's
 FastQuery transport is an upstream stub and is deliberately unexposed).
 Design choices:
@@ -257,18 +257,18 @@ Design choices:
   server writing a user file is accepted only where the CLI already does it:
   - by itself, only for a run naming no targets when no inventory file
     exists anywhere (the CLI's first-run case);
-  - otherwise only through the `discover_qna_targets` tool (the CLI's
+  - otherwise only through the `qna_discover_targets` tool (the CLI's
     `--auto-discovery`), which adds missing hosts even to an inventory that
     has some and evaluates nothing. A separate tool rather than a flag on
-    `evaluate_client_relevance_qna` keeps evaluation a read and makes
+    `qna_eval_client_relevance` keeps evaluation a read and makes
     writing the user file a call of its own that a client can approve.
   An existing file, even an empty placeholder, was left there on purpose,
   so it never triggers discovery by itself. Discovery runs off the event
   loop with its own audit line. With a `BIGFIX_QNA_INVENTORY` path (the
   admin's file) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and
-  `discover_qna_targets` is not registered (same "registered tools are the
+  `qna_discover_targets` is not registered (same "registered tools are the
   boundary" rule as writes, rechecked per call). It never runs from
-  `list_qna_targets` and never as the interactive SSH discovery.
+  `qna_list_targets` and never as the interactive SSH discovery.
 - **Containers default on.** Containers are ephemeral and run on the
   operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.

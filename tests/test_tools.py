@@ -561,7 +561,7 @@ class TestToolSurface:
         # targets default on, so the qna tools are part of the default surface,
         # discovery too with the default inventory (test_qna.py covers the
         # gates turning them off)
-        expected |= {"evaluate_client_relevance_qna", "list_qna_targets", "discover_qna_targets"}
+        expected |= {"qna_eval_client_relevance", "qna_list_targets", "qna_discover_targets"}
         assert tools == expected
 
 
