@@ -251,19 +251,21 @@ Design choices:
 - **No targets means every inventory host.** qna only reads, so an
   unselected run covers the fleet, as the CLI does, capped at
   `MAX_QNA_TARGETS` like any run. The audit line lists every target.
-- **Auto-discovery when no hosts are found.** An unselected run that finds no
-  inventory hosts (no file, or one with no `[hosts.*]` such as discovery's
-  own placeholder) first runs the package's non-interactive
-  `run_auto_discovery` into `~/.bigfix/remote_clients.toml`, off the event
-  loop, with its own audit line. This makes the server write a user file and
-  probe local qna, container images and developer.bigfix.com. That was
-  accepted because it is the CLI's documented first-run behavior for the
-  same file. It is bounded: it never runs with a `BIGFIX_QNA_INVENTORY` path
-  (the admin's file), never runs for explicit targets or `list_qna_targets`,
-  never uses the interactive SSH discovery, and `BIGFIX_QNA_AUTO_DISCOVERY=0`
-  turns it off. Unlike the CLI it repeats while the inventory has no hosts,
-  so a placeholder doesn't block it once whatever kept it from finding any
-  is fixed.
+- **Auto-discovery on first run, or when asked.** The package's
+  non-interactive `run_auto_discovery` writes `~/.bigfix/remote_clients.toml`
+  and probes local qna, container images and developer.bigfix.com, so the
+  server writing a user file is accepted only where the CLI already does it:
+  - by itself, only for a run naming no targets when no inventory file
+    exists anywhere (the CLI's first-run case);
+  - otherwise only when the caller passes `auto_discovery=true` (the CLI's
+    `--auto-discovery`), which adds missing hosts even to an inventory that
+    has some.
+  An existing file, even an empty placeholder, was left there on purpose,
+  so it never triggers discovery by itself. Discovery runs off the event
+  loop with its own audit line. It never runs with a `BIGFIX_QNA_INVENTORY`
+  path (the admin's file; asking is refused), never from
+  `list_qna_targets`, never as the interactive SSH discovery, and
+  `BIGFIX_QNA_AUTO_DISCOVERY=0` turns it off.
 - **Containers default on.** Containers are ephemeral and run on the
   operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.

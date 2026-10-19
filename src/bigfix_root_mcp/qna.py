@@ -13,8 +13,9 @@ Target constructor is never exposed to tool parameters. The stubbed
 The inventory is BIGFIX_QNA_INVENTORY when set, else the package CLI's own
 default (~/.bigfix/remote_clients.toml, then the all-users config dir). A
 run that names no targets covers every inventory host, as the CLI does -
-qna only reads. When that finds no hosts, the package's non-interactive
-auto-discovery fills ~/.bigfix/remote_clients.toml first; its interactive
+qna only reads. When no inventory file exists at all, the package's non-interactive
+auto-discovery fills ~/.bigfix/remote_clients.toml first (the CLI's first
+run); once a file exists it runs only when the caller asks. Its interactive
 SSH discovery is never used, so the server never prompts.
 
 This module must not import fastmcp (same layering rule as clientquery.py):
@@ -104,7 +105,7 @@ def inventory_path() -> str:
 
 
 def discovery_allowed() -> bool:
-    """Whether auto-discovery may run when an unselected run finds no hosts.
+    """Whether auto-discovery may run at all (by itself or when asked).
 
     Only with the default inventory: a BIGFIX_QNA_INVENTORY path is the
     admin's file, and discovery only ever writes ~/.bigfix. Set
@@ -166,8 +167,27 @@ def _load_inventory() -> list:
 
 
 def discovery_needed() -> bool:
-    """An unselected run would find no inventory hosts, and may discover some."""
-    return discovery_allowed() and not _load_inventory()
+    """No inventory file exists yet, so an unselected run discovers first.
+
+    Only the missing-file case, as in the package CLI: a file that exists,
+    even one with no hosts (an earlier discovery's placeholder, say), was
+    left there on purpose, so discovery then waits to be asked for.
+    """
+    return discovery_allowed() and not inventory_path()
+
+
+def discovery_refusal() -> str:
+    """Why auto_discovery=true is refused here; "" when it is allowed."""
+    if inventory_disabled():
+        return "auto-discovery is off: BIGFIX_QNA_INVENTORY=0 disables the inventory."
+    if _configured_inventory():
+        return (
+            "auto-discovery only writes ~/.bigfix/remote_clients.toml, and this server "
+            "uses the BIGFIX_QNA_INVENTORY file instead; add hosts there."
+        )
+    if not discovery_allowed():
+        return "auto-discovery is off on this server (BIGFIX_QNA_AUTO_DISCOVERY=0)."
+    return ""
 
 
 async def run_discovery() -> list[str]:
@@ -205,9 +225,10 @@ def resolve_targets(inventory_names: list[str] | None, container_images: list[st
         # nothing selected: every inventory host, as the package CLI does
         targets = _load_inventory()
         if not targets:
+            hint = " or pass auto_discovery=true," if discovery_allowed() else ""
             raise ValueError(
-                "no targets: pass inventory_targets and/or container_images, or "
-                "add hosts to the inventory (see list_qna_targets)."
+                "no targets: pass inventory_targets and/or container_images,"
+                f"{hint} or add hosts to the inventory (see list_qna_targets)."
             )
         if len(targets) > MAX_QNA_TARGETS:
             raise ValueError(

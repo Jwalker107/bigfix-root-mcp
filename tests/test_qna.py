@@ -306,7 +306,8 @@ class TestInventoryPath:
 
 
 class TestAutoDiscovery:
-    """Discovery runs only for an unselected run that finds no inventory hosts."""
+    """Discovery runs by itself only when no inventory file exists (the CLI's
+    first run); with a file, only when the caller asks for it."""
 
     def test_allowed_by_default(self, fake_pkg, monkeypatch):
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
@@ -328,13 +329,16 @@ class TestAutoDiscovery:
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
         assert qna.discovery_needed() is True
 
-    def test_needed_when_the_inventory_has_no_hosts(self, fake_pkg, monkeypatch, tmp_path):
+    def test_not_needed_when_the_inventory_exists_without_hosts(
+        self, fake_pkg, monkeypatch, tmp_path
+    ):
+        """A file someone (or an earlier discovery) left is a choice to respect."""
         placeholder = tmp_path / "remote_clients.toml"
         placeholder.write_text("# no hosts found yet\n")
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
         fake_pkg.default_inventory = str(placeholder)
         fake_pkg.inventory_error = fake_pkg.InventoryError("defines no [hosts.*] entries")
-        assert qna.discovery_needed() is True
+        assert qna.discovery_needed() is False
 
     def test_not_needed_when_the_inventory_has_hosts(self, fake_pkg, monkeypatch):
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
@@ -459,6 +463,7 @@ class TestEvaluateClientRelevanceQna:
         assert result.data["inventory_path"] == "/etc/qna-hosts.toml"
         assert result.data["inventory_source"] == "BIGFIX_QNA_INVENTORY"
         assert result.data["auto_discovery"] is False
+        assert result.data["auto_discovery_pending"] is False
 
     async def test_list_qna_targets_reports_the_default_inventory(
         self, gated, fake_pkg, monkeypatch
@@ -470,6 +475,7 @@ class TestEvaluateClientRelevanceQna:
         assert result.data["inventory_path"] == USER_INVENTORY
         assert result.data["inventory_source"] == "default search"
         assert result.data["auto_discovery"] is True
+        assert result.data["auto_discovery_pending"] is False
         # listing never probes hosts or writes files
         assert not called(fake_pkg, "run_auto_discovery")
 
@@ -502,6 +508,67 @@ class TestEvaluateClientRelevanceQna:
         assert result.data["auto_discovery"] == {"path": USER_INVENTORY, "added": ["local"]}
         audit = [r.getMessage() for r in caplog.records if "BIGFIX QNA" in r.getMessage()]
         assert any("auto-discovery" in line for line in audit)
+
+    async def test_existing_empty_inventory_does_not_discover_by_itself(
+        self, gated, fake_pkg, tmp_path
+    ):
+        placeholder = tmp_path / "remote_clients.toml"
+        placeholder.write_text("# no hosts found yet\n")
+        fake_pkg.default_inventory = str(placeholder)
+        fake_pkg.inventory_error = fake_pkg.InventoryError("defines no [hosts.*] entries")
+        with pytest.raises(ToolError, match="auto_discovery"):
+            await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+        assert not called(fake_pkg, "run_auto_discovery")
+
+    async def test_asking_for_discovery_runs_it_with_an_existing_inventory(self, gated, fake_pkg):
+        """Like the CLI's --auto-discovery: add what is missing, then evaluate."""
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [fake_pkg.Target(kind="ssh", name="mac-test")]
+        fake_pkg.discovered = [
+            fake_pkg.Target(kind="ssh", name="mac-test"),
+            fake_pkg.Target(kind="local", name="local"),
+        ]
+        fake_pkg.scripted_results = [fake_pkg.FakeResult(host="mac-test")]
+        result = await call(
+            gated,
+            "evaluate_client_relevance_qna",
+            {"relevance": "true", "auto_discovery": True},
+        )
+        assert called(fake_pkg, "run_auto_discovery") == [("run_auto_discovery", USER_INVENTORY)]
+        assert called(fake_pkg, "evaluate")[0][2] == ("mac-test", "local")
+        assert result.data["auto_discovery"]["path"] == USER_INVENTORY
+
+    async def test_asking_for_discovery_with_a_pinned_inventory_is_refused(
+        self, gated, fake_pkg, monkeypatch
+    ):
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
+        fake_pkg.inventory = [fake_pkg.Target(kind="ssh", name="mac-test")]
+        with pytest.raises(ToolError, match="BIGFIX_QNA_INVENTORY"):
+            await call(
+                gated,
+                "evaluate_client_relevance_qna",
+                {"relevance": "true", "auto_discovery": True},
+            )
+        assert not called(fake_pkg, "run_auto_discovery")
+        assert not called(fake_pkg, "evaluate")
+
+    async def test_asking_for_discovery_when_switched_off_is_refused(
+        self, gated, fake_pkg, monkeypatch
+    ):
+        monkeypatch.setenv("BIGFIX_QNA_AUTO_DISCOVERY", "0")
+        with pytest.raises(ToolError, match="BIGFIX_QNA_AUTO_DISCOVERY"):
+            await call(
+                gated,
+                "evaluate_client_relevance_qna",
+                {"relevance": "true", "auto_discovery": True},
+            )
+        assert not called(fake_pkg, "run_auto_discovery")
+
+    async def test_list_reports_pending_first_run_discovery(self, gated, fake_pkg):
+        result = await call(gated, "list_qna_targets")
+        assert result.data["inventory_path"] is None
+        assert result.data["auto_discovery_pending"] is True
+        assert not called(fake_pkg, "run_auto_discovery")
 
     async def test_discovery_finding_nothing_is_a_clear_error(self, gated, fake_pkg):
         with pytest.raises(ToolError, match="auto-discovery"):

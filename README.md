@@ -137,7 +137,7 @@ Environment variables win over config files:
 | Write tools | `BIGFIX_ALLOW_WRITES`: `true` to register them | off |
 | TLS verification | `BES_SSL_VERIFY`: `tofu`, `false`, `true`, or a CA bundle path. `tofu` (or unset) pins self-signed certs on first use for session relevance only; besapi treats it as `false`. See [Safety and design notes](#safety-and-design-notes) | unset (`tofu`) |
 | qna inventory | `BIGFIX_QNA_INVENTORY`: path to a remote_clients.toml, or `0` for none (see [qna evaluation](#qna-evaluation)) | `~/.bigfix/remote_clients.toml`, then the all-users config dir |
-| qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts when the default inventory has none | on |
+| qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
@@ -311,14 +311,16 @@ Targets are deliberately constrained:
   reads), up to 20 per run. An `online_evaluator` entry sends the client
   relevance to developer.bigfix.com, so name targets explicitly to keep a
   query off it.
-- **Auto-discovery:** when a run names no targets and the default inventory
-  has no hosts (or doesn't exist), the server first runs the package's
-  non-interactive auto-discovery. It probes local qna, a downloaded qna, the
-  container engine's images and developer.bigfix.com, then writes what works
-  to `~/.bigfix/remote_clients.toml`; that first run can take minutes. It
-  never runs with a `BIGFIX_QNA_INVENTORY` path (that file is the admin's),
-  never uses the interactive SSH discovery, and never prompts. Set
-  `BIGFIX_QNA_AUTO_DISCOVERY=0` to turn it off.
+- **Auto-discovery:** the package's non-interactive discovery probes local
+  qna, a downloaded qna, the container engine's images and
+  developer.bigfix.com, then adds what works to
+  `~/.bigfix/remote_clients.toml`; it can take minutes. As with the CLI, it
+  runs by itself only on a first run: one that names no targets when no
+  inventory file exists. Once the file exists, even with no hosts, it runs
+  only when the caller passes `auto_discovery=true` (the CLI's
+  `--auto-discovery`). It never runs with a `BIGFIX_QNA_INVENTORY` path (that
+  file is the admin's), never uses the interactive SSH discovery, and never
+  prompts. Set `BIGFIX_QNA_AUTO_DISCOVERY=0` to turn it off.
 
 Security notes: qna executes on the targets; the controller downloads BigFix
 agent artifacts from support.bigfix.com (SHA256-verified against the release
