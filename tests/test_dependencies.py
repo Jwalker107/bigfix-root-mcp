@@ -47,5 +47,5 @@ def test_first_party_dependencies_have_no_uv_cooldown():
 def test_first_party_dependencies_have_no_dependabot_cooldown():
     yaml = pytest.importorskip("yaml")
     config = yaml.safe_load((PYPROJECT.parent / ".github" / "dependabot.yml").read_text())
-    (uv,) = [u for u in config["updates"] if u["package-ecosystem"] == "uv"]
+    (uv,) = (u for u in config["updates"] if u["package-ecosystem"] == "uv")
     assert sorted(uv["cooldown"]["exclude"]) == FIRST_PARTY
