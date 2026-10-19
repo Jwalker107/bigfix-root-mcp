@@ -1,10 +1,11 @@
 """Shared test fakes: scriptable stand-ins for besapi's BESConnection."""
 
 import lxml.objectify
+import platformdirs
 import pytest
 
 import bigfix_root_mcp.connection as connection_module
-from bigfix_root_mcp import sessionrelevance
+from bigfix_root_mcp import qna, sessionrelevance
 
 
 class FakeResponse:
@@ -98,7 +99,21 @@ def isolated_home(monkeypatch, tmp_path_factory):
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    # the qna inventory search also looks in the all-users config directory
+    # (/Library/Application Support/bigfix, /etc/xdg/bigfix, ...)
+    site = home / "site-config"
+    monkeypatch.setattr(
+        platformdirs, "site_config_dir", lambda appname="", *_a, **_k: str(site / appname)
+    )
+    monkeypatch.delenv("SUDO_USER", raising=False)
+    # real qna auto-discovery probes docker and the network; a test that
+    # reaches it without scripting it (test_qna.py's fake_pkg) is a bug
+    monkeypatch.setattr(qna, "_run_auto_discovery", _no_real_discovery)
     return home
+
+
+def _no_real_discovery(path):
+    raise AssertionError(f"a test ran real qna auto-discovery into {path}")
 
 
 @pytest.fixture

@@ -221,7 +221,7 @@ root server is exactly why findings stay advisory.
 
 ## qna evaluation gate (bigfix-remote-client-relevance)
 
-`evaluate_client_relevance_qna` runs relevance through the `qna` binary on
+`qna_eval_client_relevance` runs relevance through the `qna` binary on
 lab targets - it never touches the BigFix deployment (the package's
 FastQuery transport is an upstream stub and is deliberately unexposed).
 Design choices:
@@ -233,12 +233,56 @@ Design choices:
   lazily through one seam (`qna._qna()`), and tools register only when the
   package is importable *and* a target source is allowed - same "registered
   tools are the boundary" pattern as writes.
-- **Target policy: admin inventory plus container images.** Inventory
-  entries come from a hosts.toml named by `BIGFIX_QNA_INVENTORY` and pass
-  through exactly as the admin wrote them; callers may add container image
-  names (validated against an image-reference pattern). The package's
-  `Target` constructor is never exposed to tool parameters: no
-  caller-supplied ssh hosts, users, or become flags.
+- **Target policy: server-side inventory plus container images.** Inventory
+  entries come from a remote_clients.toml on the server and pass through
+  exactly as written; callers may add container image names (validated
+  against an image-reference pattern). The package's `Target` constructor is
+  never exposed to tool parameters: no caller-supplied ssh hosts, users, or
+  become flags.
+- **Same default inventory as the package CLI.** `BIGFIX_QNA_INVENTORY`
+  wins; unset, the server uses `find_inventory_path()`'s search
+  (`~/.bigfix/remote_clients.toml`, then the all-users config directory),
+  so the file a user already set up for the CLI just works. The CLI's
+  first candidate, `./remote_clients.toml`, is skipped: an MCP server's
+  working directory is arbitrary, so a file there was never chosen for it.
+  `BIGFIX_QNA_INVENTORY=0` turns the inventory off. The registration gate
+  never searches (it is read at import), it only checks the inventory isn't
+  disabled.
+- **No targets means every inventory host.** qna only reads, so an
+  unselected run covers the fleet, as the CLI does, capped at
+  `MAX_QNA_TARGETS` like any run. The audit line lists every target.
+- **Auto-discovery on first run, or when asked.** The package's
+  non-interactive `run_auto_discovery` writes `~/.bigfix/remote_clients.toml`
+  and probes local qna, container images and developer.bigfix.com, so the
+  server writing a user file is accepted only where the CLI already does it:
+  - by itself, only for a run naming no targets when no inventory file
+    exists anywhere (the CLI's first-run case);
+  - otherwise only through the `qna_discover_targets` tool (the CLI's
+    `--auto-discovery`), which adds missing hosts even to an inventory that
+    has some and evaluates nothing. A separate tool rather than a flag on
+    `qna_eval_client_relevance` keeps evaluation a read and makes
+    writing the user file a call of its own that a client can approve.
+  An existing file, even an empty placeholder, was left there on purpose,
+  so it never triggers discovery by itself. Discovery runs off the event
+  loop with its own audit line. With a `BIGFIX_QNA_INVENTORY` path (the
+  admin's file) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and
+  `qna_discover_targets` is not registered (same "registered tools are the
+  boundary" rule as writes, rechecked per call). It never runs from
+  `qna_list_targets` and never as the interactive SSH discovery. It is
+  also refused while the inventory in use is some other file (the site
+  config dir's, the sudo invoker's): discovery writes only the current
+  user's `~/.bigfix`, which the search would then find first, hiding every
+  host the server had been using. Discoveries are serialized by a lock, and
+  a first run that waited rechecks whether an inventory now exists. A
+  malformed inventory surfaces as a `ValueError` (the package's
+  `InventoryError` is not one, so `bes_errors` would pass it on raw).
+- **Point at discovery when a run comes up empty.** A run that finds no
+  targets in an existing inventory, or returns no result rows (error rows
+  count as results), suggests `qna_discover_targets`. If discovery ran within
+  `DISCOVERY_RECENT_SECONDS` (15 minutes), it says what that run added and
+  where hosts go instead, since repeating a minutes-long probe would likely
+  find the same. The last run is remembered in process memory only, because
+  the server writes no state of its own; a restart forgets it.
 - **Containers default on.** Containers are ephemeral and run on the
   operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.

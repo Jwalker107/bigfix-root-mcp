@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bigfix-root-mcp"
-version = "1.1.0"
+version = "1.2.0"
 description = "A minimal read-only MCP server around the besapi library (BigFix REST API)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,7 +27,7 @@ dependencies = [
     # pure stdlib, stdout-silent, safe inside a stdio server
     "bigfix-relevance-analyzer>=1.38.1,<2",
     # fast client relevance evaluation with the qna binary on containers or
-    # inventoried hosts (qna.py, evaluate_client_relevance_qna)
+    # inventoried hosts (qna.py, qna_eval_client_relevance)
     "bigfix-remote-client-relevance>=1.5.4,<2",
     # session relevance evaluation (sessionrelevance.py); besapi remains the
     # client for every other REST call. 0.5.1: an unclosed sync client no

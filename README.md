@@ -62,8 +62,9 @@ Registered by default; absent when every target source is disabled - see
 
 | Tool | Purpose |
 | --- | --- |
-| `evaluate_client_relevance_qna` | Evaluate client relevance with the `qna` binary on containers or admin-inventoried hosts - about a second per warm run. Never touches the BigFix deployment. |
-| `list_qna_targets` | List the admin-configured inventory targets and whether container images are allowed. |
+| `qna_eval_client_relevance` | Evaluate client relevance with the `qna` binary on containers or inventory hosts (every inventory host when none is named) - about a second per warm run. Never touches the BigFix deployment. |
+| `qna_list_targets` | List the inventory targets, which inventory file is in use, whether auto-discovery may run, and whether container images are allowed. |
+| `qna_discover_targets` | Find qna targets that work on the server's host and add them to `~/.bigfix/remote_clients.toml`, like the CLI's `--auto-discovery`. Registered only with the default inventory. |
 
 ### Write tools (opt-in)
 
@@ -136,7 +137,8 @@ Environment variables win over config files:
 | Password | `BES_PASSWORD` | - |
 | Write tools | `BIGFIX_ALLOW_WRITES`: `true` to register them | off |
 | TLS verification | `BES_SSL_VERIFY`: `tofu`, `false`, `true`, or a CA bundle path. `tofu` (or unset) pins self-signed certs on first use for session relevance only; besapi treats it as `false`. See [Safety and design notes](#safety-and-design-notes) | unset (`tofu`) |
-| qna inventory | `BIGFIX_QNA_INVENTORY`: path to a hosts.toml (see [qna evaluation](#qna-evaluation)) | unset |
+| qna inventory | `BIGFIX_QNA_INVENTORY`: path to a remote_clients.toml, or `0` for none (see [qna evaluation](#qna-evaluation)) | `~/.bigfix/remote_clients.toml`, then the all-users config dir |
+| qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
@@ -275,9 +277,9 @@ Explorer", so both setups evaluate the query exactly as written.
 ## qna evaluation
 
 [bigfix-remote-client-relevance](https://github.com/jgstew/bigfix-remote-client-relevance)
-is a base dependency, so `evaluate_client_relevance_qna` / `list_qna_targets`
+is a base dependency, so `qna_eval_client_relevance` / `qna_list_targets`
 are registered by default; they are absent only when both target sources are
-off (no `BIGFIX_QNA_INVENTORY` and `BIGFIX_QNA_CONTAINERS=0`). The `[qna]`
+off (`BIGFIX_QNA_INVENTORY=0` and `BIGFIX_QNA_CONTAINERS=0`). The `[qna]`
 extra still exists so older install commands keep working, but adds nothing.
 It evaluates **client** relevance with
 the BigFix `qna` binary on lab targets in about a second per warm run - the
@@ -295,15 +297,44 @@ Targets are deliberately constrained:
   needs docker or podman on the server host. First use of an image is slow
   (agent artifact download + derived image build); later runs are ~1s. Set
   `BIGFIX_QNA_CONTAINERS=0` to forbid these.
-- **Inventory hosts** come only from an admin-configured hosts.toml named by
-  `BIGFIX_QNA_INVENTORY` (the package's inventory format: ssh/local/container
-  entries). The MCP client can pick entries by name but can never supply ssh
-  hosts, users, or `become` flags of its own.
+- **Inventory hosts** come only from a remote_clients.toml on the server (the
+  package's inventory format: ssh/local/container/online_evaluator entries).
+  `BIGFIX_QNA_INVENTORY` names one; unset, the server uses the same default
+  as the package's CLI: `~/.bigfix/remote_clients.toml`, then the all-users
+  config directory (`/Library/Application Support/bigfix`, `/etc/xdg/bigfix`,
+  `C:\ProgramData\bigfix`). Unlike the CLI it never reads
+  `./remote_clients.toml`, since an MCP server's working directory is wherever
+  its client launched it. `BIGFIX_QNA_INVENTORY=0` turns the inventory off.
+  The MCP client can pick entries by name but can never supply ssh hosts,
+  users, or `become` flags of its own. `qna_list_targets` shows the file in
+  use.
+- **No targets named** means every inventory host, as with the CLI (qna only
+  reads), up to 20 per run. An `online_evaluator` entry sends the client
+  relevance to developer.bigfix.com, so name targets explicitly to keep a
+  query off it.
+- **Auto-discovery:** the package's non-interactive discovery probes local
+  qna, a downloaded qna (cached by the package), the container engine's
+  images and developer.bigfix.com, then adds what works to
+  `~/.bigfix/remote_clients.toml`; it can take minutes. Runs are one at a
+  time. It is refused while the inventory in use is another file (the
+  all-users one, say), because the new `~/.bigfix` file would hide it. As with the CLI, it
+  runs by itself only on a first run: one that names no targets when no
+  inventory file exists. Once the file exists, even with no hosts, it runs
+  only when the `qna_discover_targets` tool is called (the CLI's
+  `--auto-discovery`). With a `BIGFIX_QNA_INVENTORY` path (that file is the
+  admin's) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and that tool is
+  not registered. It never uses the interactive SSH discovery and never
+  prompts. When a `qna_eval_client_relevance` run finds no targets (an empty
+  inventory, a name missing from an empty one) or returns no result rows at
+  all, the error or the payload's `hint` suggests `qna_discover_targets`.
+  Error rows count as results. If discovery ran in the last 15 minutes, it
+  says what that run added and where to add hosts by hand instead.
 
 Security notes: qna executes on the targets; the controller downloads BigFix
 agent artifacts from support.bigfix.com (SHA256-verified against the release
 site's sums) on first use of a version, so the server host makes outbound
-requests; every run leaves a `BIGFIX QNA` audit line on stderr.
+requests; every run, and every auto-discovery, leaves a `BIGFIX QNA` audit
+line on stderr.
 
 ## Writes
 
