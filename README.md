@@ -135,7 +135,7 @@ Environment variables win over config files:
 | REST operator | `BES_USER_NAME` | - |
 | Password | `BES_PASSWORD` | - |
 | Write tools | `BIGFIX_ALLOW_WRITES`: `true` to register them | off |
-| TLS verification | `BES_SSL_VERIFY`: `false`, `true`, or a CA bundle path | `false` (besapi default) |
+| TLS verification | `BES_SSL_VERIFY`: `tofu`, `false`, `true`, or a CA bundle path. `tofu` (or unset) pins self-signed certs on first use for session relevance only; besapi treats it as `false`. See [Safety and design notes](#safety-and-design-notes) | unset (`tofu`) |
 | qna inventory | `BIGFIX_QNA_INVENTORY`: path to a hosts.toml (see [qna evaluation](#qna-evaluation)) | unset |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
@@ -240,11 +240,20 @@ this caveat so LLM clients don't overstate scoped results.
   a required `site_path` parameter.
 - **Stdout hygiene**: stdout belongs to the MCP stdio transport; all logging
   goes to stderr, and config loading avoids besapi helpers that print.
-- **TLS**: verification is off by default to match besapi; set
-  `BES_SSL_VERIFY=true` (or a CA bundle path) for anything beyond a lab. The
-  setting applies to session relevance too, including `REQUESTS_CA_BUNDLE` /
-  `CURL_CA_BUNDLE` with `true`. `HTTPS_PROXY` / `NO_PROXY` are honoured by the
-  besapi tools only; session relevance connects directly.
+- **TLS**: with `BES_SSL_VERIFY` unset (or `tofu`), session relevance
+  trusts on first use: a CA-valid certificate is used as is, a self-signed
+  one (the BigFix default) is pinned on first contact in
+  `~/.bigfix/.remote_session_known_certs.toml` - shared with the
+  bigfix-remote-session-relevance CLI - and a different certificate later is
+  refused before any credentials are sent. Remove the entry (or run
+  `bigfix-remote-session-relevance --forget-cert HOST:PORT`) once a
+  legitimately changed certificate is verified out of band. The besapi tools
+  have no pinning and stay unverified in that mode, matching besapi. An
+  explicit `false` turns verification off for both; `true` (honouring
+  `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE`) or a CA bundle path verifies both
+  and pins nothing - use one of those for anything beyond a lab.
+  `HTTPS_PROXY` / `NO_PROXY` are honoured by the besapi tools only; session
+  relevance connects directly.
 - Generic BigFix logic here is written to be upstreamed into besapi - see
   [docs/besapi-proposals.md](docs/besapi-proposals.md).
 

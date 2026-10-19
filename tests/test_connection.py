@@ -80,10 +80,45 @@ def test_missing_config_error_lists_paths_not_password(monkeypatch, tmp_path):
         ("1", True),
         ("yes", True),
         ("/etc/ssl/ca-bundle.pem", "/etc/ssl/ca-bundle.pem"),
+        # session relevance's trust-on-first-use; besapi itself gets its default
+        ("tofu", False),
+        ("TOFU", False),
     ],
 )
 def test_ssl_verify_parsing(raw, expected):
     assert connection._parse_verify(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "tofu"),
+    [
+        (None, True),  # unset: pin self-signed certs on first use
+        ("", True),
+        ("tofu", True),
+        ("false", False),  # explicit false stays "no verification at all"
+        ("true", False),
+        ("/etc/ssl/ca-bundle.pem", False),
+    ],
+)
+def test_session_relevance_tofu_follows_bes_ssl_verify(monkeypatch, raw, tofu):
+    monkeypatch.setenv("BES_ROOT_SERVER", "https://bes.example.com:52311")
+    monkeypatch.setenv("BES_USER_NAME", "envuser")
+    monkeypatch.setenv("BES_PASSWORD", "envpass")
+    if raw is not None:
+        monkeypatch.setenv("BES_SSL_VERIFY", raw)
+    assert connection.load_config().tofu is tofu
+
+
+def test_tofu_from_config_file(monkeypatch, tmp_path):
+    path = write_conf(
+        tmp_path / "besapi.conf",
+        "[besapi]\nBES_ROOT_SERVER = https://bes.example.com:52311\n"
+        "BES_USER_NAME = fileuser\nBES_PASSWORD = filepass\nBES_SSL_VERIFY = tofu\n",
+    )
+    monkeypatch.setattr(connection, "CONFIG_PATHS", [path])
+    config = connection.load_config()
+    assert config.tofu is True
+    assert config.verify is False
 
 
 def test_no_stdout_output(monkeypatch, tmp_path, capsys):

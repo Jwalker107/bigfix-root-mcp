@@ -9,11 +9,18 @@ backend sends the JSON body first and falls back to the form on the
 
 Connection settings come from connection.load_config() - the same env vars
 and besapi.conf files besapi uses - read once and handed to the library
-explicitly, never through its own ~/.bigfix config. Its TOFU certificate
-store and deployment-id discovery are both off: BES_SSL_VERIFY means what
-it means for besapi (including requests' CA-bundle env vars), the timeouts
-are besapi's, and nothing is written under the user's home. One difference
-remains: the library's httpx transport ignores HTTPS_PROXY / NO_PROXY.
+explicitly, never through its own ~/.bigfix config, and deployment-id
+discovery is off. The timeouts are besapi's.
+
+TLS: with BES_SSL_VERIFY unset (or "tofu") session relevance uses the
+library's trust on first use. A CA-valid cert is used as is; a self-signed
+one - the BigFix default - is pinned on first contact in the library's
+~/.bigfix/.remote_session_known_certs.toml (shared with its CLI), and from
+then on a different cert is refused before any credentials are sent. An
+explicit false, true or CA path means what it means for besapi (true also
+honours requests' CA-bundle env vars), and pins nothing. besapi itself has
+no pinning and keeps verify=False in the unset/tofu case. One more
+difference: the library's httpx transport ignores HTTPS_PROXY / NO_PROXY.
 
 A successful answer is returned as the server's own JSON, not rebuilt from
 the library's typed answers: those coerce every type but integer and boolean
@@ -42,7 +49,9 @@ from bigfix_remote_session_relevance import (
     ConfigError,
     ConnectionConfig,
     SessionRelevanceResult,
+    TrustStore,
 )
+from bigfix_remote_session_relevance.trust import default_known_certs_path
 
 from bigfix_root_mcp import connection
 
@@ -56,6 +65,9 @@ READ_TIMEOUT_SECONDS = 600
 
 # requests honours these with verify=True, so besapi does; httpx does not
 _REQUESTS_CA_ENV = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
+
+# TLS failures about a pinned (or unpinnable) cert, which need the pin file
+_PIN_CODES = ("pin_mismatch", "pinned_cert_invalid", "untrusted")
 
 # server text kept in an error message, like errors._snippet
 _DETAIL_LEN = 500
@@ -98,7 +110,8 @@ def _connection_config(config: connection.BESConfig) -> ConnectionConfig:
         server=config.rootserver,
         username=config.username,
         password=config.password,
-        verify=_verify(config.verify),
+        # "tofu" pins through the TrustStore that _make_client passes
+        verify="tofu" if config.tofu else _verify(config.verify),
         connect_timeout=CONNECT_TIMEOUT_SECONDS,
         read_timeout=READ_TIMEOUT_SECONDS,
     )
@@ -126,7 +139,9 @@ async def _make_client(config: connection.BESConfig) -> AsyncSessionRelevanceCli
     # built on the loop it will run on
     return AsyncSessionRelevanceClient(
         Config(connections=(_connection_config(config),)),
-        trust=None,
+        # no callback: a first-seen self-signed cert is pinned and logged
+        # (there is nobody to prompt behind an MCP server)
+        trust=TrustStore() if config.tofu else None,
         discover=False,
         record_deployment_ids=False,
         transport_factory=_transport_factory,
@@ -194,6 +209,12 @@ def _envelope(result: SessionRelevanceResult) -> dict:
         )
     status = f" (HTTP {error.http_status})" if error.http_status else ""
     message = f"BigFix {error.kind} error{status}: {error.message}"
+    if error.code in _PIN_CODES:
+        message = (
+            f"{message}. Pinned certificates: {default_known_certs_path()} - once the "
+            "new certificate is verified out of band, remove its entry or run "
+            "`bigfix-remote-session-relevance --forget-cert HOST:PORT`."
+        )
     detail = (error.detail or "").strip()
     if detail and detail not in message:
         # the library's message is generic for http/format errors; the

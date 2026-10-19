@@ -58,11 +58,16 @@ class BESConfig:
     password: str
     # False (besapi default) | True | path to a CA bundle:
     verify: bool | str = False
+    # session relevance only: trust on first use, pinning a self-signed cert
+    # (BES_SSL_VERIFY unset or "tofu"); besapi still gets `verify` above
+    tofu: bool = False
 
 
 def _parse_verify(value: str) -> bool | str:
     lowered = value.strip().lower()
-    if lowered in ("", "0", "false", "no"):
+    # "tofu" is session relevance's mode (see BESConfig.tofu); besapi has no
+    # pinning, so it keeps its default
+    if lowered in ("", "0", "false", "no", "tofu"):
         return False
     if lowered in ("1", "true", "yes"):
         return True
@@ -73,7 +78,8 @@ def _parse_verify(value: str) -> bool | str:
 def load_config() -> BESConfig:
     """Resolve connection settings: env vars win, then besapi.conf files.
 
-    Env vars: BES_ROOT_SERVER, BES_USER_NAME, BES_PASSWORD, BES_SSL_VERIFY.
+    Env vars: BES_ROOT_SERVER, BES_USER_NAME, BES_PASSWORD, BES_SSL_VERIFY
+    (false, true, a CA bundle path, or tofu - the same as unset).
     Config files (first found wins): [besapi] section with the same keys.
     """
     rootserver = os.environ.get("BES_ROOT_SERVER", "").strip()
@@ -114,6 +120,7 @@ def load_config() -> BESConfig:
         username=username,
         password=password,
         verify=_parse_verify(verify_raw),
+        tofu=verify_raw.strip().lower() in ("", "tofu"),
     )
 
 

@@ -91,6 +91,16 @@ class FakeBESConnection:
         return self.is_main_operator
 
 
+@pytest.fixture(autouse=True)
+def isolated_home(monkeypatch, tmp_path_factory):
+    """Every test gets its own HOME, so nothing can touch the real ~/.bigfix
+    (session relevance pins self-signed certs there on first use)."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
 @pytest.fixture
 def fake_conn(monkeypatch):
     """Install a FakeBESConnection as the cached module-level connection."""
