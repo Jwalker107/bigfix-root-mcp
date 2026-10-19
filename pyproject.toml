@@ -36,7 +36,7 @@ dependencies = [
     # is itself valid JSON ("Invalid JSON") is retried over JSON too. Capped
     # at <2, not <1: 1.x is announced as keeping the 0.5 contract.
     "bigfix-remote-session-relevance>=0.5.2,<2",
-    "fastmcp==4.0.3",
+    "fastmcp==4.1.0",
     # imported directly by src/ (besxml.py, errors.py, server.py). They do
     # arrive transitively via besapi/fastmcp today, but a package should
     # depend on what it imports rather than on another package's dependency
