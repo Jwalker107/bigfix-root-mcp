@@ -268,7 +268,14 @@ Design choices:
   admin's file) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and
   `qna_discover_targets` is not registered (same "registered tools are the
   boundary" rule as writes, rechecked per call). It never runs from
-  `qna_list_targets` and never as the interactive SSH discovery.
+  `qna_list_targets` and never as the interactive SSH discovery. It is
+  also refused while the inventory in use is some other file (the site
+  config dir's, the sudo invoker's): discovery writes only the current
+  user's `~/.bigfix`, which the search would then find first, hiding every
+  host the server had been using. Discoveries are serialized by a lock, and
+  a first run that waited rechecks whether an inventory now exists. A
+  malformed inventory surfaces as a `ValueError` (the package's
+  `InventoryError` is not one, so `bes_errors` would pass it on raw).
 - **Point at discovery when a run comes up empty.** A run that finds no
   targets in an existing inventory, or returns no result rows (error rows
   count as results), suggests `qna_discover_targets`. If discovery ran within

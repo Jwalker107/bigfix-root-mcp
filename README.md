@@ -313,9 +313,11 @@ Targets are deliberately constrained:
   relevance to developer.bigfix.com, so name targets explicitly to keep a
   query off it.
 - **Auto-discovery:** the package's non-interactive discovery probes local
-  qna, a downloaded qna, the container engine's images and
-  developer.bigfix.com, then adds what works to
-  `~/.bigfix/remote_clients.toml`; it can take minutes. As with the CLI, it
+  qna, a downloaded qna (cached by the package), the container engine's
+  images and developer.bigfix.com, then adds what works to
+  `~/.bigfix/remote_clients.toml`; it can take minutes. Runs are one at a
+  time. It is refused while the inventory in use is another file (the
+  all-users one, say), because the new `~/.bigfix` file would hide it. As with the CLI, it
   runs by itself only on a first run: one that names no targets when no
   inventory file exists. Once the file exists, even with no hosts, it runs
   only when the `qna_discover_targets` tool is called (the CLI's

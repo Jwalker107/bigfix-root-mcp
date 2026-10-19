@@ -296,6 +296,30 @@ Three write tools now exist behind `BIGFIX_ALLOW_WRITES` (off by default):
 Deploying actions, every `DELETE`, operator/site creation and upload remain
 unimplemented, and are documented as requiring their own design round.
 
+### Newly relevant: qna inventory and auto-discovery
+
+The qna tools (`qna_eval_client_relevance`, `qna_list_targets`,
+`qna_discover_targets`) now read the bigfix-remote-client-relevance CLI's
+default inventory (`~/.bigfix/remote_clients.toml`, then the all-users config
+dir) when `BIGFIX_QNA_INVENTORY` is unset. A run naming no targets uses every
+inventory host. Controls and residual exposure:
+
+- Callers still name inventory entries only; no caller-supplied ssh hosts,
+  users or become flags. Per-run `BIGFIX QNA` audit lines list every target.
+- **File write:** auto-discovery writes `~/.bigfix/remote_clients.toml`. It
+  runs by itself only when no inventory file exists, and otherwise only
+  through `qna_discover_targets`. That tool is not registered with a
+  `BIGFIX_QNA_INVENTORY` path or `BIGFIX_QNA_AUTO_DISCOVERY=0`. It is refused
+  while another file (site config dir, sudo invoker's home) is in use, since
+  the new file would hide it. Runs are serialized, and the audit lines are
+  written before probing and on failure.
+- **Egress:** discovery probes developer.bigfix.com, downloads a qna build
+  into the package's cache and checks container images. It may add an
+  `online_evaluator` entry, after which all-hosts runs send the caller's
+  client relevance to developer.bigfix.com unless targets are named. This
+  was accepted as matching the CLI; the README and tool docstrings say so.
+- Never interactive: the package's SSH discovery is never called.
+
 ### Still open
 
 Findings 1 (client query as a fleet-wide read), 2 (TLS default off with Basic

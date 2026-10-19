@@ -122,10 +122,11 @@ def fake_pkg(monkeypatch):
     return fake
 
 
-def empty_inventory(fake, tmp_path):
-    """An existing inventory with no hosts, e.g. discovery's placeholder."""
+def empty_inventory(fake, tmp_path, monkeypatch):
+    """~/.bigfix's inventory with no hosts, e.g. discovery's placeholder."""
     placeholder = tmp_path / "remote_clients.toml"
     placeholder.write_text("# no hosts found yet\n")
+    monkeypatch.setattr(qna, "_user_inventory_path", lambda: str(placeholder))
     fake.default_inventory = str(placeholder)
     fake.inventory_error = fake.InventoryError("defines no [hosts.*] entries")
     return str(placeholder)
@@ -314,8 +315,17 @@ class TestInventoryPath:
         broken.write_text("[hosts.a]\ntransport = 'ssh'\n[[[\n")
         monkeypatch.setenv("BIGFIX_QNA_INVENTORY", str(broken))
         fake_pkg.inventory_error = fake_pkg.InventoryError("could not parse")
-        with pytest.raises(fake_pkg.InventoryError):
+        with pytest.raises(ValueError, match="could not parse"):
             qna.list_inventory_targets()
+
+    async def test_a_broken_inventory_is_a_tool_error(self, gated, fake_pkg, tmp_path):
+        """InventoryError isn't a ValueError, so bes_errors would pass it raw."""
+        broken = tmp_path / "remote_clients.toml"
+        broken.write_bytes(b"\xff\xfe not utf-8")
+        fake_pkg.default_inventory = str(broken)
+        fake_pkg.inventory_error = fake_pkg.InventoryError("could not parse")
+        with pytest.raises(ToolError, match=r"qna_list_targets: qna inventory .*could not parse"):
+            await call(gated, "qna_list_targets")
 
 
 class TestAutoDiscovery:
@@ -358,6 +368,52 @@ class TestAutoDiscovery:
         fake_pkg.default_inventory = USER_INVENTORY
         fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
         assert qna.discovery_needed() is False
+
+    def test_refused_while_another_inventory_is_in_use(self, fake_pkg, monkeypatch):
+        """Discovery writes ~/.bigfix only; that new file would then hide the
+        site (or sudo invoker's) inventory the server was using."""
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        site = "/Library/Application Support/bigfix/remote_clients.toml"
+        fake_pkg.default_inventory = site
+        assert qna.discovery_allowed() is False
+        assert site in qna.discovery_refusal()
+        # the env-only switch the registration gate reads is still on
+        assert qna.discovery_enabled() is True
+
+    def test_allowed_when_the_user_inventory_is_in_use(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        fake_pkg.default_inventory = USER_INVENTORY
+        assert qna.discovery_allowed() is True
+        assert qna.discovery_refusal() == ""
+
+    async def test_concurrent_first_runs_discover_once(self, fake_pkg, monkeypatch):
+        """Two first runs at once would probe twice and race on one TOML file."""
+        import time
+
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        fake_pkg.discovered = [fake_pkg.Target(kind="local", name="local")]
+        slow = qna._run_auto_discovery
+
+        def slow_discovery(path):
+            time.sleep(0.05)
+            return slow(path)
+
+        monkeypatch.setattr(qna, "_run_auto_discovery", slow_discovery)
+        import asyncio
+
+        first, second = await asyncio.gather(
+            qna.run_discovery(only_if_needed=True), qna.run_discovery(only_if_needed=True)
+        )
+        assert len(called(fake_pkg, "run_auto_discovery")) == 1
+        assert sorted([first, second], key=lambda r: r is None) == [["local"], None]
+
+    async def test_other_discovery_failures_are_value_errors(self, fake_pkg, monkeypatch):
+        def broken(path):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(qna, "_run_auto_discovery", broken)
+        with pytest.raises(ValueError, match="disk full"):
+            await qna.run_discovery()
 
     async def test_run_writes_the_user_inventory(self, fake_pkg, monkeypatch):
         monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
@@ -523,20 +579,17 @@ class TestQnaEvalClientRelevance:
         assert any("auto-discovery" in line for line in audit)
 
     async def test_existing_empty_inventory_does_not_discover_by_itself(
-        self, gated, fake_pkg, tmp_path
+        self, gated, fake_pkg, monkeypatch, tmp_path
     ):
-        placeholder = tmp_path / "remote_clients.toml"
-        placeholder.write_text("# no hosts found yet\n")
-        fake_pkg.default_inventory = str(placeholder)
-        fake_pkg.inventory_error = fake_pkg.InventoryError("defines no [hosts.*] entries")
+        empty_inventory(fake_pkg, tmp_path, monkeypatch)
         with pytest.raises(ToolError, match="qna_discover_targets"):
             await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert not called(fake_pkg, "run_auto_discovery")
 
     async def test_unknown_name_in_an_empty_inventory_suggests_discovery(
-        self, gated, fake_pkg, tmp_path
+        self, gated, fake_pkg, monkeypatch, tmp_path
     ):
-        empty_inventory(fake_pkg, tmp_path)
+        empty_inventory(fake_pkg, tmp_path, monkeypatch)
         with pytest.raises(ToolError, match="qna_discover_targets"):
             await call(
                 gated,
@@ -555,11 +608,11 @@ class TestQnaEvalClientRelevance:
             )
         assert "qna_discover_targets" not in str(excinfo.value)
 
-    async def test_no_hint_after_a_recent_discovery(self, gated, fake_pkg, tmp_path):
+    async def test_no_hint_after_a_recent_discovery(self, gated, fake_pkg, monkeypatch, tmp_path):
         """Suggesting the run that just found nothing would be a loop."""
-        path = empty_inventory(fake_pkg, tmp_path)
+        path = empty_inventory(fake_pkg, tmp_path, monkeypatch)
         await call(gated, "qna_discover_targets")  # finds nothing
-        empty_inventory(fake_pkg, tmp_path)
+        empty_inventory(fake_pkg, tmp_path, monkeypatch)
         fake_pkg.now += 60
         with pytest.raises(ToolError) as excinfo:
             await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
@@ -568,17 +621,19 @@ class TestQnaEvalClientRelevance:
         assert "run qna_discover_targets" not in message
         assert path in message  # where to add hosts by hand
 
-    async def test_hint_returns_once_the_discovery_is_old(self, gated, fake_pkg, tmp_path):
-        empty_inventory(fake_pkg, tmp_path)
+    async def test_hint_returns_once_the_discovery_is_old(
+        self, gated, fake_pkg, monkeypatch, tmp_path
+    ):
+        empty_inventory(fake_pkg, tmp_path, monkeypatch)
         await call(gated, "qna_discover_targets")
-        empty_inventory(fake_pkg, tmp_path)
+        empty_inventory(fake_pkg, tmp_path, monkeypatch)
         fake_pkg.now += qna.DISCOVERY_RECENT_SECONDS + 1
         with pytest.raises(ToolError, match="run qna_discover_targets"):
             await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
 
     async def test_no_hint_when_discovery_is_off(self, gated, fake_pkg, monkeypatch, tmp_path):
         monkeypatch.setenv("BIGFIX_QNA_AUTO_DISCOVERY", "0")
-        empty_inventory(fake_pkg, tmp_path)
+        empty_inventory(fake_pkg, tmp_path, monkeypatch)
         with pytest.raises(ToolError) as excinfo:
             await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert "qna_discover_targets" not in str(excinfo.value)
@@ -631,6 +686,27 @@ class TestQnaEvalClientRelevance:
 
 class TestQnaDiscoverTargets:
     """The one way to ask for discovery once an inventory file exists."""
+
+    async def test_a_failed_discovery_still_leaves_an_audit_line(
+        self, gated, fake_pkg, monkeypatch, caplog
+    ):
+        """Probing happens before the write that can fail."""
+
+        def fails_late(path):
+            raise OSError("cannot write")
+
+        monkeypatch.setattr(qna, "_run_auto_discovery", fails_late)
+        with caplog.at_level("INFO"), pytest.raises(ToolError, match="cannot write"):
+            await call(gated, "qna_discover_targets")
+        audit = [r.getMessage() for r in caplog.records if "BIGFIX QNA" in r.getMessage()]
+        assert any("auto-discovery start" in line for line in audit)
+        assert any("auto-discovery failed" in line for line in audit)
+
+    async def test_refused_when_a_site_inventory_is_in_use(self, gated, fake_pkg):
+        fake_pkg.default_inventory = "/etc/xdg/bigfix/remote_clients.toml"
+        with pytest.raises(ToolError, match="/etc/xdg/bigfix"):
+            await call(gated, "qna_discover_targets")
+        assert not called(fake_pkg, "run_auto_discovery")
 
     async def test_adds_missing_hosts_to_an_existing_inventory(self, gated, fake_pkg, caplog):
         """Like the CLI's --auto-discovery: add what is missing, evaluate nothing."""

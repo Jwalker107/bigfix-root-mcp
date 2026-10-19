@@ -49,6 +49,7 @@ _clock = time.monotonic
 # (when, hosts added) of this process's last discovery: memory only, since
 # the server writes nothing of its own; a restart forgets it
 _last_discovery: tuple[float, list[str]] | None = None
+_discovery_lock = asyncio.Lock()
 
 
 def package_available() -> bool:
@@ -113,16 +114,35 @@ def inventory_path() -> str:
     return _configured_inventory() or _find_default_inventory() or ""
 
 
-def discovery_allowed() -> bool:
-    """Whether auto-discovery may run at all (by itself or when asked).
+def discovery_enabled() -> bool:
+    """The environment allows auto-discovery; read at import for registration.
 
     Only with the default inventory: a BIGFIX_QNA_INVENTORY path is the
     admin's file, and discovery only ever writes ~/.bigfix. Set
-    BIGFIX_QNA_AUTO_DISCOVERY=0 to never probe or write anything.
+    BIGFIX_QNA_AUTO_DISCOVERY=0 to never probe or write anything. Like the
+    qna gate, this never searches for a file.
     """
     if inventory_disabled() or _configured_inventory():
         return False
     return os.environ.get("BIGFIX_QNA_AUTO_DISCOVERY", "1").strip().lower() not in _OFF
+
+
+def _same_file(a: str, b: str) -> bool:
+    return Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+
+
+def discovery_allowed() -> bool:
+    """Whether auto-discovery may run now (by itself or when asked).
+
+    discovery_enabled(), and the inventory in use is ~/.bigfix's or none
+    yet: with the site config dir's file (or the sudo invoker's) in use,
+    discovery's new ~/.bigfix file would be searched first from then on and
+    hide every host the server had been using.
+    """
+    if not discovery_enabled():
+        return False
+    path = inventory_path()
+    return not path or _same_file(path, _user_inventory_path())
 
 
 def containers_enabled() -> bool:
@@ -156,7 +176,7 @@ def _defines_no_hosts(path: str) -> bool:
     try:
         with open(path, "rb") as handle:
             return not tomllib.load(handle).get("hosts")
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return False
 
 
@@ -167,12 +187,13 @@ def _load_inventory() -> list:
     pkg = _qna()
     try:
         return list(pkg.load_inventory(path))
-    except pkg.InventoryError:
+    except pkg.InventoryError as exc:
         # the package refuses a file with no [hosts.*] (discovery's comment-only
         # placeholder, typically); here that just means no inventory targets
         if _defines_no_hosts(path):
             return []
-        raise
+        # InventoryError is no ValueError, which bes_errors would pass on raw
+        raise ValueError(f"qna inventory {path}: {exc}") from exc
 
 
 def discovery_needed() -> bool:
@@ -194,25 +215,41 @@ def discovery_refusal() -> str:
             "auto-discovery only writes ~/.bigfix/remote_clients.toml, and this server "
             "uses the BIGFIX_QNA_INVENTORY file instead; add hosts there."
         )
-    if not discovery_allowed():
+    if not discovery_enabled():
         return "auto-discovery is off on this server (BIGFIX_QNA_AUTO_DISCOVERY=0)."
+    if not discovery_allowed():
+        return (
+            f"auto-discovery only writes {_user_inventory_path()}, which would then hide "
+            f"the inventory this server uses, {inventory_path()}; add hosts there."
+        )
     return ""
 
 
-async def run_discovery() -> list[str]:
+def user_inventory_path() -> str:
+    """~/.bigfix/remote_clients.toml, where discovery writes (for audit lines)."""
+    return _user_inventory_path()
+
+
+async def run_discovery(*, only_if_needed: bool = False) -> list[str] | None:
     """Run auto-discovery into ~/.bigfix/remote_clients.toml; return hosts added.
 
     It probes this machine's qna, the container engine's images and
     developer.bigfix.com, which takes a while: off the event loop it goes.
+    One at a time: two at once would probe twice and race on one file.
+    only_if_needed (a first run) returns None when, once its turn comes, an
+    earlier discovery has already created the inventory.
     """
     global _last_discovery  # noqa: PLW0603 - per-process memory, by design
     pkg = _qna()
-    try:
-        added = await asyncio.to_thread(_run_auto_discovery, _user_inventory_path())
-    except pkg.InventoryError as exc:
-        raise ValueError(f"qna auto-discovery failed: {exc}") from exc
-    _last_discovery = (_clock(), list(added))
-    return added
+    async with _discovery_lock:
+        if only_if_needed and not discovery_needed():
+            return None
+        try:
+            added = await asyncio.to_thread(_run_auto_discovery, _user_inventory_path())
+        except (pkg.InventoryError, OSError) as exc:
+            raise ValueError(f"qna auto-discovery failed: {exc}") from exc
+        _last_discovery = (_clock(), list(added))
+        return added
 
 
 def discovery_hint() -> str:
