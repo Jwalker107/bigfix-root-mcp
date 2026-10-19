@@ -26,10 +26,11 @@ A successful answer is returned as the server's own JSON, not rebuilt from
 the library's typed answers: those coerce every type but integer and boolean
 to a string, so a floating point answer would come back as "1.5".
 
-The library's own SessionRelevanceClient is not used: its anyio blocking
-portal deadlocks at interpreter exit unless close() is called first, and
-this server keeps its client for the life of the process. Instead the async
-client lives on an event loop in a daemon thread, which exit simply drops.
+The library's sync SessionRelevanceClient runs the async client on a loop
+thread of its own, so the sync tools can call it from any worker thread.
+The server keeps it for the life of the process and never closes it on the
+way out, which needs bigfix-remote-session-relevance >= 0.5.1: earlier
+versions deadlocked interpreter exit with an unclosed client.
 
 This module must not import fastmcp (same layering rule as clientquery.py):
 it returns the /api/query JSON envelope, which errors.check_relevance_envelope
@@ -37,17 +38,14 @@ already understands, and raises plain exceptions that errors.bes_errors
 translates.
 """
 
-import asyncio
 import os
 import threading
-from collections.abc import Coroutine
-from typing import Any, TypeVar
 
 from bigfix_remote_session_relevance import (
-    AsyncSessionRelevanceClient,
     Config,
     ConfigError,
     ConnectionConfig,
+    SessionRelevanceClient,
     SessionRelevanceResult,
     TrustStore,
 )
@@ -75,14 +73,9 @@ _DETAIL_LEN = 500
 # replaced in tests with one that returns an httpx.MockTransport
 _transport_factory = None
 
-T = TypeVar("T")
-
-_lock = threading.Lock()
-# serializes building/replacing the client so two threads never both build
-# one; never taken on the loop thread, so holding it across _run() is safe
+# serializes building and dropping the client so two threads never both build one
 _build_lock = threading.Lock()
-_loop: asyncio.AbstractEventLoop | None = None
-_client: AsyncSessionRelevanceClient | None = None
+_client: SessionRelevanceClient | None = None
 
 
 class SessionRelevanceUnavailableError(RuntimeError):
@@ -117,27 +110,8 @@ def _connection_config(config: connection.BESConfig) -> ConnectionConfig:
     )
 
 
-def _run(coro: Coroutine[Any, Any, T]) -> T:
-    """Run a coroutine on the background loop and wait for it, from any thread.
-
-    The tools are sync and may run concurrently on worker threads; they all
-    share one loop, so the client's connection pool and locks live in one
-    place.
-    """
-    global _loop  # noqa: PLW0603 - started once, on first use
-    with _lock:
-        if _loop is None:
-            _loop = asyncio.new_event_loop()
-            threading.Thread(
-                target=_loop.run_forever, name="bigfix-root-mcp-session-relevance", daemon=True
-            ).start()
-        loop = _loop
-    return asyncio.run_coroutine_threadsafe(coro, loop).result()
-
-
-async def _make_client(config: connection.BESConfig) -> AsyncSessionRelevanceClient:
-    # built on the loop it will run on
-    return AsyncSessionRelevanceClient(
+def _make_client(config: connection.BESConfig) -> SessionRelevanceClient:
+    return SessionRelevanceClient(
         Config(connections=(_connection_config(config),)),
         # no callback: a first-seen self-signed cert is pinned and logged
         # (there is nobody to prompt behind an MCP server)
@@ -148,7 +122,7 @@ async def _make_client(config: connection.BESConfig) -> AsyncSessionRelevanceCli
     )
 
 
-def _get_client() -> AsyncSessionRelevanceClient:
+def _get_client() -> SessionRelevanceClient:
     """Lazy cached client, the counterpart of connection.get_connection().
 
     The config is read once, when the client is built, exactly like besapi's
@@ -158,7 +132,7 @@ def _get_client() -> AsyncSessionRelevanceClient:
     global _client  # noqa: PLW0603 - lazy cache, cleared by reset()
     with _build_lock:
         if _client is None:
-            _client = _run(_make_client(connection.load_config()))
+            _client = _make_client(connection.load_config())
         return _client
 
 
@@ -168,7 +142,7 @@ def reset() -> None:
     with _build_lock:
         stale, _client = _client, None
         if stale is not None:
-            _run(stale.aclose())
+            stale.close()
 
 
 def _success_envelope(result: SessionRelevanceResult) -> dict:
@@ -235,7 +209,7 @@ def evaluate(session_relevance: str) -> dict:
     """
     try:
         # transport failures come back as results; only config mistakes raise
-        results = _run(_get_client().evaluate(session_relevance))
+        results = _get_client().evaluate(session_relevance)
     except ConfigError as err:
         raise connection.ConnectionConfigError(
             f"unusable BigFix connection settings (check BES_ROOT_SERVER): {err}"

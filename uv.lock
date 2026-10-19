@@ -14,9 +14,9 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
-bigfix-relevance-analyzer = { timestamp = "0001-01-01T00:00:00Z", span = "PT1H" }
-bigfix-remote-client-relevance = { timestamp = "0001-01-01T00:00:00Z", span = "PT1H" }
-bigfix-remote-session-relevance = { timestamp = "0001-01-01T00:00:00Z", span = "PT1H" }
+bigfix-relevance-analyzer = false
+bigfix-remote-client-relevance = false
+bigfix-remote-session-relevance = false
 
 [manifest]
 constraints = [{ name = "fastmcp-slim", specifier = ">=4.0.0b1" }]
@@ -243,7 +243,7 @@ wheels = [
 
 [[package]]
 name = "bigfix-remote-session-relevance"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -253,9 +253,9 @@ dependencies = [
     { name = "httpx" },
     { name = "tomlkit" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/54/10/d43609f8584ded90d701ba5d74db1a82fbc2e9aade7863e5aad540cc3215/bigfix_remote_session_relevance-0.5.0.tar.gz", hash = "sha256:914e5583493aea6508c7e19466b23b211e57c051c285dad3fa52f2157aa5791b", size = 195099, upload-time = "2026-10-18T16:11:03.412Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c4/24/10c790b010220ffa921208d5eccd9a47b52a9faa8dd9962c29a917e55a65/bigfix_remote_session_relevance-0.5.1.tar.gz", hash = "sha256:c58f36c4024b343cda5625b2ccf003087891752a5f03079b2e10f6b8f1a27d4f", size = 196506, upload-time = "2026-10-19T19:37:03.684Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/a6/ed6d8a32e66fdfd7151959b0ef8708c8da9febfa52b4578a7f0d07b67c4f/bigfix_remote_session_relevance-0.5.0-py3-none-any.whl", hash = "sha256:1c122ebe2e49482c615c470091e805899eefbe8cb9489c4c859ad5f280a2cbaa", size = 75499, upload-time = "2026-10-18T16:11:02.144Z" },
+    { url = "https://files.pythonhosted.org/packages/82/82/cb5acba4b6dd3e1dde8eebf818e71d7969fc414a31fe10eeaceb75efe2e2/bigfix_remote_session_relevance-0.5.1-py3-none-any.whl", hash = "sha256:1104f7a4587d96d36e595df4c5292ae56c49967fdc3990535c1257d21a20cc34", size = 76136, upload-time = "2026-10-19T19:37:02.54Z" },
 ]
 
 [[package]]
@@ -295,7 +295,7 @@ requires-dist = [
     { name = "bigfix-relevance-analyzer", specifier = ">=1.38.1,<2" },
     { name = "bigfix-remote-client-relevance", specifier = ">=1.5.4,<2" },
     { name = "bigfix-remote-client-relevance", marker = "extra == 'qna'", specifier = ">=1.5.4,<2" },
-    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.0,<1" },
+    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.1,<1" },
     { name = "fastmcp", specifier = "==4.0.3" },
     { name = "lxml" },
     { name = "pydantic" },

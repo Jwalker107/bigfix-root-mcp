@@ -13,7 +13,7 @@ PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
 EXPECTED = {
     "bigfix-relevance-analyzer": ">=1.38.1,<2",
-    "bigfix-remote-session-relevance": ">=0.5.0,<1",
+    "bigfix-remote-session-relevance": ">=0.5.1,<1",
     "bigfix-remote-client-relevance": ">=1.5.4,<2",
 }
 
@@ -30,3 +30,22 @@ def _dependencies() -> dict[str, str]:
 @pytest.mark.parametrize(("name", "spec"), EXPECTED.items())
 def test_required_with_bounds(name, spec):
     assert _dependencies().get(name) == spec
+
+
+FIRST_PARTY = sorted(name for name in EXPECTED if name.startswith("bigfix-"))
+
+
+def test_first_party_dependencies_have_no_uv_cooldown():
+    """jgstew's own bigfix-* packages iterate faster than any cooldown."""
+    uv = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["tool"]["uv"]
+    # every bigfix-* base dependency is listed, so a new one cannot be missed
+    declared = sorted(name for name in _dependencies() if name.startswith("bigfix-"))
+    assert declared == FIRST_PARTY
+    assert uv["exclude-newer-package"] == dict.fromkeys(FIRST_PARTY, False)
+
+
+def test_first_party_dependencies_have_no_dependabot_cooldown():
+    yaml = pytest.importorskip("yaml")
+    config = yaml.safe_load((PYPROJECT.parent / ".github" / "dependabot.yml").read_text())
+    (uv,) = [u for u in config["updates"] if u["package-ecosystem"] == "uv"]
+    assert sorted(uv["cooldown"]["exclude"]) == FIRST_PARTY

@@ -149,13 +149,13 @@ def test_reset_connection_also_resets_session_relevance(server, monkeypatch):
     sessionrelevance.evaluate("1")
     first = sessionrelevance._client
     closed = []
-    real_aclose = first.aclose
+    real_close = first.close
 
-    async def spy():
+    def spy():
         closed.append(True)
-        await real_aclose()
+        real_close()
 
-    monkeypatch.setattr(first, "aclose", spy)
+    monkeypatch.setattr(first, "close", spy)
     connection.reset_connection()
     assert closed == [True]
     assert sessionrelevance._client is None
@@ -167,6 +167,8 @@ def test_reset_connection_also_resets_session_relevance(server, monkeypatch):
     assert seen[-1].url.host == "other.example.com"
 
 
+# 0.5.1 fixed this in the library (an unclosed SessionRelevanceClient no
+# longer hangs exit); kept as the guard now that the server relies on it
 _EXIT_SCRIPT = """
 import httpx
 from bigfix_root_mcp import sessionrelevance
@@ -180,7 +182,7 @@ assert sessionrelevance.evaluate("1")["result"] == [1]
 
 
 def test_cached_client_never_blocks_interpreter_exit(lab_config):
-    """Regression: an unclosed anyio-portal client deadlocked at shutdown.
+    """Regression: an unclosed client deadlocked at shutdown (library < 0.5.1).
 
     The server keeps its client for the life of the process and never closes
     it, so exiting with one still open must not hang.

@@ -30,8 +30,9 @@ dependencies = [
     # inventoried hosts (qna.py, evaluate_client_relevance_qna)
     "bigfix-remote-client-relevance>=1.5.4,<2",
     # session relevance evaluation (sessionrelevance.py); besapi remains the
-    # client for every other REST call
-    "bigfix-remote-session-relevance>=0.5.0,<1",
+    # client for every other REST call. 0.5.1: an unclosed sync client no
+    # longer hangs interpreter exit, which the server relies on
+    "bigfix-remote-session-relevance>=0.5.1,<1",
     "fastmcp==4.0.3",
     # imported directly by src/ (besxml.py, errors.py, server.py). They do
     # arrive transitively via besapi/fastmcp today, but a package should
@@ -77,10 +78,12 @@ required-version = ">=0.12"
 # or compromised) releases aren't picked up immediately. Matches the
 # `cooldown` on the uv/github-actions ecosystems in .github/dependabot.yml.
 exclude-newer = "7 days"
-# First-party packages (same author as this project) are exempt from the
-# cooldown: it guards against compromised *third-party* releases, and these
-# iterate faster than 7 days.
-exclude-newer-package = { bigfix-relevance-analyzer = "1 hour", bigfix-remote-client-relevance = "1 hour", bigfix-remote-session-relevance = "1 hour" }
+# First-party bigfix-* packages (same author as this project) have no
+# cooldown at all (`false`, supported since uv 0.12): it guards against
+# compromised *third-party* releases, and these are released together with
+# changes here - a fix published minutes ago is often the one this project
+# needs next. Same exemption as `cooldown.exclude` in .github/dependabot.yml.
+exclude-newer-package = { bigfix-relevance-analyzer = false, bigfix-remote-client-relevance = false, bigfix-remote-session-relevance = false }
 # fastmcp 4.0.0b1 is a meta-package over fastmcp-slim; uv only allows
 # prereleases for explicitly named packages, so the transitive dep has to be
 # named here to be resolvable at all.
