@@ -64,6 +64,7 @@ Registered by default; absent when every target source is disabled - see
 | --- | --- |
 | `evaluate_client_relevance_qna` | Evaluate client relevance with the `qna` binary on containers or inventory hosts (every inventory host when none is named) - about a second per warm run. Never touches the BigFix deployment. |
 | `list_qna_targets` | List the inventory targets, which inventory file is in use, whether auto-discovery may run, and whether container images are allowed. |
+| `discover_qna_targets` | Find qna targets that work on the server's host and add them to `~/.bigfix/remote_clients.toml`, like the CLI's `--auto-discovery`. Registered only with the default inventory. |
 
 ### Write tools (opt-in)
 
@@ -317,10 +318,11 @@ Targets are deliberately constrained:
   `~/.bigfix/remote_clients.toml`; it can take minutes. As with the CLI, it
   runs by itself only on a first run: one that names no targets when no
   inventory file exists. Once the file exists, even with no hosts, it runs
-  only when the caller passes `auto_discovery=true` (the CLI's
-  `--auto-discovery`). It never runs with a `BIGFIX_QNA_INVENTORY` path (that
-  file is the admin's), never uses the interactive SSH discovery, and never
-  prompts. Set `BIGFIX_QNA_AUTO_DISCOVERY=0` to turn it off.
+  only when the `discover_qna_targets` tool is called (the CLI's
+  `--auto-discovery`). With a `BIGFIX_QNA_INVENTORY` path (that file is the
+  admin's) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and that tool is
+  not registered. It never uses the interactive SSH discovery and never
+  prompts.
 
 Security notes: qna executes on the targets; the controller downloads BigFix
 agent artifacts from support.bigfix.com (SHA256-verified against the release

@@ -908,6 +908,16 @@ def _audit(tool: str, target: str, dry_run: bool, outcome: str) -> None:
 
 if QNA_ENABLED:
 
+    async def _discover_qna(ctx: Context) -> dict:
+        """Run auto-discovery with progress and an audit line; {path, added}."""
+        await ctx.report_progress(progress=0, message="Running qna auto-discovery.")
+        added = await qna.run_discovery()
+        path = qna.inventory_path() or None
+        # audit line, like a run's: discovery runs qna locally, in containers
+        # and on developer.bigfix.com, and writes ~/.bigfix/remote_clients.toml
+        logger.info("BIGFIX QNA auto-discovery path=%s added=%s", path, added)
+        return {"path": path, "added": added}
+
     @mcp.tool
     @bes_errors("list_qna_targets")
     def list_qna_targets() -> dict:
@@ -917,9 +927,9 @@ if QNA_ENABLED:
         when the server sets it, else the default search
         (~/.bigfix/remote_clients.toml, then the all-users config directory);
         null when none was found. A run that names no targets uses every
-        inventory host. auto_discovery says whether evaluate_client_relevance_qna
-        may be asked to discover hosts (probing local qna, container images
-        and developer.bigfix.com, and adding what works to
+        inventory host. auto_discovery says whether discover_qna_targets is
+        available (it probes local qna, container images and
+        developer.bigfix.com, and adds what works to
         ~/.bigfix/remote_clients.toml); auto_discovery_pending says no
         inventory file exists yet, so the next run naming no targets
         discovers first without being asked. containers_allowed says whether
@@ -977,16 +987,6 @@ if QNA_ENABLED:
             float,
             Field(description=f"Per-target timeout (1-{qna.MAX_QNA_TIMEOUT_SECONDS})."),
         ] = 30,
-        auto_discovery: Annotated[
-            bool,
-            Field(
-                description=(
-                    "Discover qna targets on the server's host first and add new "
-                    "ones to ~/.bigfix/remote_clients.toml. Slow (can take "
-                    "minutes); only when list_qna_targets reports auto_discovery."
-                )
-            ),
-        ] = False,
         limit: Annotated[int | None, LIMIT_FIELD] = None,
         offset: Annotated[int, OFFSET_FIELD] = 0,
     ) -> dict:
@@ -1005,8 +1005,8 @@ if QNA_ENABLED:
         (list_qna_targets: auto_discovery_pending), such a run first
         discovers what works on the server's host and records it in
         ~/.bigfix/remote_clients.toml; once the file exists, discovery runs
-        only with auto_discovery=true. The payload's auto_discovery says what
-        was added. A discovering run can take minutes.
+        only through discover_qna_targets. The payload's auto_discovery says
+        what was added. A discovering run can take minutes.
 
         Per-target failures come back as result rows with error_kind
         ('relevance', 'qna', 'bootstrap', 'transport', 'resolve'), never as a
@@ -1015,20 +1015,14 @@ if QNA_ENABLED:
         """
         advisory = analysis.preflight(relevance, dialect="client")
         discovered = None
-        selected = bool(inventory_targets or container_images)
-        if auto_discovery and (refusal := qna.discovery_refusal()):
-            raise ValueError(refusal)
-        if auto_discovery or (not selected and qna.discovery_needed()):
-            await ctx.report_progress(progress=0, message="Running qna auto-discovery.")
-            added = await qna.run_discovery()
-            discovered = {"path": qna.inventory_path() or None, "added": added}
-            # audit line: discovery runs qna locally, in containers and online
-            logger.info("BIGFIX QNA auto-discovery path=%s added=%s", discovered["path"], added)
-            if not added and not selected and not qna.list_inventory_targets():
+        if not inventory_targets and not container_images and qna.discovery_needed():
+            discovered = await _discover_qna(ctx)
+            if not discovered["added"]:
                 raise ValueError(
                     "no targets: qna auto-discovery found nothing that works on this "
                     "server; pass container_images, or add hosts to "
-                    f"{discovered['path'] or 'the inventory'} by hand."
+                    f"{discovered['path'] or 'the inventory'} by hand, or fix what "
+                    "kept discovery from finding any and run discover_qna_targets."
                 )
         targets = qna.resolve_targets(inventory_targets, container_images)
         timeout_seconds = max(1, min(timeout_seconds, qna.MAX_QNA_TIMEOUT_SECONDS))
@@ -1068,6 +1062,36 @@ if QNA_ENABLED:
         if discovered is not None:
             payload["auto_discovery"] = discovered
         return _with_advisory(_bound_rows(payload, "results", limit, offset), advisory)
+
+
+# registered only where discovery may run (default inventory, not switched
+# off): with a BIGFIX_QNA_INVENTORY path the tool does not exist, like writes
+if QNA_ENABLED and qna.discovery_allowed():
+
+    @mcp.tool
+    @bes_errors("discover_qna_targets")
+    async def discover_qna_targets(ctx: Context) -> dict:
+        """Find qna targets that work on the server's host and add them to the
+        inventory, like the bigfix-remote-client-relevance CLI's
+        --auto-discovery. Evaluates nothing.
+
+        Probes this host's qna, a downloaded qna, the container engine's
+        images and developer.bigfix.com, then adds what works and is not
+        already listed to ~/.bigfix/remote_clients.toml. Never uses SSH
+        discovery and never prompts. Slow: it can take minutes. Use it when
+        list_qna_targets shows no (or too few) inventory hosts; a run of
+        evaluate_client_relevance_qna naming no targets only discovers by
+        itself when no inventory file exists yet.
+
+        Returns path (the inventory written), added (new host names) and
+        inventory (every target now listed).
+        """
+        # rechecked per call: the gate is read at import, the environment
+        # can differ by now
+        if refusal := qna.discovery_refusal():
+            raise ValueError(refusal)
+        discovered = await _discover_qna(ctx)
+        return {**discovered, "inventory": qna.list_inventory_targets()}
 
 
 if WRITES_ENABLED:

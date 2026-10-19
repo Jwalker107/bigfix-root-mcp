@@ -257,15 +257,18 @@ Design choices:
   server writing a user file is accepted only where the CLI already does it:
   - by itself, only for a run naming no targets when no inventory file
     exists anywhere (the CLI's first-run case);
-  - otherwise only when the caller passes `auto_discovery=true` (the CLI's
+  - otherwise only through the `discover_qna_targets` tool (the CLI's
     `--auto-discovery`), which adds missing hosts even to an inventory that
-    has some.
+    has some and evaluates nothing. A separate tool rather than a flag on
+    `evaluate_client_relevance_qna` keeps evaluation a read and makes
+    writing the user file a call of its own that a client can approve.
   An existing file, even an empty placeholder, was left there on purpose,
   so it never triggers discovery by itself. Discovery runs off the event
-  loop with its own audit line. It never runs with a `BIGFIX_QNA_INVENTORY`
-  path (the admin's file; asking is refused), never from
-  `list_qna_targets`, never as the interactive SSH discovery, and
-  `BIGFIX_QNA_AUTO_DISCOVERY=0` turns it off.
+  loop with its own audit line. With a `BIGFIX_QNA_INVENTORY` path (the
+  admin's file) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and
+  `discover_qna_targets` is not registered (same "registered tools are the
+  boundary" rule as writes, rechecked per call). It never runs from
+  `list_qna_targets` and never as the interactive SSH discovery.
 - **Containers default on.** Containers are ephemeral and run on the
   operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.

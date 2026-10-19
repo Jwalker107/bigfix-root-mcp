@@ -15,7 +15,7 @@ default (~/.bigfix/remote_clients.toml, then the all-users config dir). A
 run that names no targets covers every inventory host, as the CLI does -
 qna only reads. When no inventory file exists at all, the package's non-interactive
 auto-discovery fills ~/.bigfix/remote_clients.toml first (the CLI's first
-run); once a file exists it runs only when the caller asks. Its interactive
+run); once a file exists it runs only through discover_qna_targets. Its interactive
 SSH discovery is never used, so the server never prompts.
 
 This module must not import fastmcp (same layering rule as clientquery.py):
@@ -177,7 +177,7 @@ def discovery_needed() -> bool:
 
 
 def discovery_refusal() -> str:
-    """Why auto_discovery=true is refused here; "" when it is allowed."""
+    """Why discover_qna_targets is refused here; "" when it is allowed."""
     if inventory_disabled():
         return "auto-discovery is off: BIGFIX_QNA_INVENTORY=0 disables the inventory."
     if _configured_inventory():
@@ -225,7 +225,7 @@ def resolve_targets(inventory_names: list[str] | None, container_images: list[st
         # nothing selected: every inventory host, as the package CLI does
         targets = _load_inventory()
         if not targets:
-            hint = " or pass auto_discovery=true," if discovery_allowed() else ""
+            hint = " or run discover_qna_targets," if discovery_allowed() else ""
             raise ValueError(
                 "no targets: pass inventory_targets and/or container_images,"
                 f"{hint} or add hosts to the inventory (see list_qna_targets)."

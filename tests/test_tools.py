@@ -558,9 +558,10 @@ class TestToolSurface:
             "validate_bes_xml",
         }
         # bigfix-remote-client-relevance is a base dependency and container
-        # targets default on, so the qna tools are part of the default surface
-        # (test_qna.py covers the gate turning them off)
-        expected |= {"evaluate_client_relevance_qna", "list_qna_targets"}
+        # targets default on, so the qna tools are part of the default surface,
+        # discovery too with the default inventory (test_qna.py covers the
+        # gates turning them off)
+        expected |= {"evaluate_client_relevance_qna", "list_qna_targets", "discover_qna_targets"}
         assert tools == expected
 
 
