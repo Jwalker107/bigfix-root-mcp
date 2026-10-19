@@ -5,19 +5,29 @@ and centralized in _qna(): a server that never evaluates client relevance
 never pays for it, and tests fake it at the sys.modules seam.
 
 Target policy - the security boundary alongside the registration gate in
-server.py: only names from the admin-configured inventory file plus
-caller-named container images. No caller-supplied ssh hosts, users, or
-become flags; the package's Target constructor is never exposed to tool
-parameters. The stubbed 'fastquery' transport is deliberately unexposed.
+server.py: only names from the inventory file plus caller-named container
+images. No caller-supplied ssh hosts, users, or become flags; the package's
+Target constructor is never exposed to tool parameters. The stubbed
+'fastquery' transport is deliberately unexposed.
+
+The inventory is BIGFIX_QNA_INVENTORY when set, else the package CLI's own
+default (~/.bigfix/remote_clients.toml, then the all-users config dir). A
+run that names no targets covers every inventory host, as the CLI does -
+qna only reads. When that finds no hosts, the package's non-interactive
+auto-discovery fills ~/.bigfix/remote_clients.toml first; its interactive
+SSH discovery is never used, so the server never prompts.
 
 This module must not import fastmcp (same layering rule as clientquery.py):
 it raises ValueError and server.py translates.
 """
 
+import asyncio
 import importlib.util
 import os
 import re
 import sys
+import tomllib
+from pathlib import Path
 
 MAX_QNA_TIMEOUT_SECONDS = 300
 MAX_QNA_TARGETS = 20
@@ -38,9 +48,71 @@ def package_available() -> bool:
     return importlib.util.find_spec(_PACKAGE) is not None
 
 
-def inventory_path() -> str:
-    """The admin-configured hosts.toml path; "" when not configured."""
+_OFF = ("0", "false", "no", "off")
+
+
+def _configured_inventory() -> str:
+    """BIGFIX_QNA_INVENTORY as set: a path, an off value, or "" for the default."""
     return os.environ.get("BIGFIX_QNA_INVENTORY", "").strip()
+
+
+def inventory_disabled() -> bool:
+    """BIGFIX_QNA_INVENTORY=0 turns off the inventory (and discovery) entirely."""
+    return _configured_inventory().lower() in _OFF
+
+
+def inventory_source() -> str:
+    """Where inventory_path() comes from, for list_qna_targets."""
+    if inventory_disabled():
+        return "disabled"
+    return "BIGFIX_QNA_INVENTORY" if _configured_inventory() else "default search"
+
+
+def _find_default_inventory() -> str | None:
+    """The package CLI's default inventory search, minus the working directory.
+
+    The CLI looks in ./remote_clients.toml first; an MCP server's working
+    directory is wherever its client happened to launch it, so a file there
+    is not one anyone chose for this server.
+    """
+    from bigfix_remote_client_relevance import inventory_paths  # noqa: PLC0415 - lazy
+
+    # default_candidates() is cwd first, then ~/.bigfix, then the site dir
+    found = inventory_paths.find_inventory_path(inventory_paths.default_candidates()[1:])
+    return None if found is None else str(found)
+
+
+def _user_inventory_path() -> str:
+    """~/.bigfix/remote_clients.toml: the one file auto-discovery writes."""
+    from bigfix_remote_client_relevance import inventory_paths  # noqa: PLC0415 - lazy
+
+    return str(inventory_paths.user_inventory_path())
+
+
+def _run_auto_discovery(path: str) -> list[str]:
+    """The package's non-interactive discovery; returns the host names added."""
+    from bigfix_remote_client_relevance import discovery  # noqa: PLC0415 - lazy
+
+    return discovery.run_auto_discovery(Path(path))
+
+
+def inventory_path() -> str:
+    """The inventory file in use; "" when there is none (or it is disabled)."""
+    if inventory_disabled():
+        return ""
+    return _configured_inventory() or _find_default_inventory() or ""
+
+
+def discovery_allowed() -> bool:
+    """Whether auto-discovery may run when an unselected run finds no hosts.
+
+    Only with the default inventory: a BIGFIX_QNA_INVENTORY path is the
+    admin's file, and discovery only ever writes ~/.bigfix. Set
+    BIGFIX_QNA_AUTO_DISCOVERY=0 to never probe or write anything.
+    """
+    if inventory_disabled() or _configured_inventory():
+        return False
+    return os.environ.get("BIGFIX_QNA_AUTO_DISCOVERY", "1").strip().lower() not in _OFF
 
 
 def containers_enabled() -> bool:
@@ -50,16 +122,17 @@ def containers_enabled() -> bool:
     container engine, and without docker/podman a run fails cleanly. Set
     BIGFIX_QNA_CONTAINERS=0 to restrict targets to the inventory file only.
     """
-    return os.environ.get("BIGFIX_QNA_CONTAINERS", "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-    )
+    return os.environ.get("BIGFIX_QNA_CONTAINERS", "1").strip().lower() not in _OFF
 
 
 def qna_enabled() -> bool:
-    """Registration gate: package importable AND at least one target source."""
-    return package_available() and (bool(inventory_path()) or containers_enabled())
+    """Registration gate: package importable AND at least one target source.
+
+    Read at import, so it never searches for or loads an inventory: unless
+    disabled, the inventory counts as a source (it may be found, or
+    discovered, later).
+    """
+    return package_available() and (not inventory_disabled() or containers_enabled())
 
 
 def _qna():
@@ -69,15 +142,49 @@ def _qna():
     return pkg
 
 
+def _defines_no_hosts(path: str) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            return not tomllib.load(handle).get("hosts")
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+
+
 def _load_inventory() -> list:
     path = inventory_path()
     if not path:
         return []
-    return list(_qna().load_inventory(path))
+    pkg = _qna()
+    try:
+        return list(pkg.load_inventory(path))
+    except pkg.InventoryError:
+        # the package refuses a file with no [hosts.*] (discovery's comment-only
+        # placeholder, typically); here that just means no inventory targets
+        if _defines_no_hosts(path):
+            return []
+        raise
+
+
+def discovery_needed() -> bool:
+    """An unselected run would find no inventory hosts, and may discover some."""
+    return discovery_allowed() and not _load_inventory()
+
+
+async def run_discovery() -> list[str]:
+    """Run auto-discovery into ~/.bigfix/remote_clients.toml; return hosts added.
+
+    It probes this machine's qna, the container engine's images and
+    developer.bigfix.com, which takes a while: off the event loop it goes.
+    """
+    pkg = _qna()
+    try:
+        return await asyncio.to_thread(_run_auto_discovery, _user_inventory_path())
+    except pkg.InventoryError as exc:
+        raise ValueError(f"qna auto-discovery failed: {exc}") from exc
 
 
 def list_inventory_targets() -> list[dict]:
-    """Name/kind/label rows for the admin-configured inventory; [] when unset."""
+    """Name/kind/label rows for the inventory in use; [] when there is none."""
     return [
         {"name": target.name, "kind": target.kind, "label": target.label}
         for target in _load_inventory()
@@ -87,18 +194,35 @@ def list_inventory_targets() -> list[dict]:
 def resolve_targets(inventory_names: list[str] | None, container_images: list[str] | None) -> list:
     """Validate tool input and build the Target list.
 
-    Inventory targets are returned exactly as the admin configured them
-    (user/become/verify stay theirs); container targets are built from the
-    image name alone. Everything else is refused with a ValueError.
+    Inventory targets are returned exactly as the inventory configures them
+    (user/become/verify stay its own); container targets are built from the
+    image name alone. Selecting nothing selects every inventory host.
+    Everything else is refused with a ValueError.
     """
     targets: list = []
+
+    if not inventory_names and not container_images:
+        # nothing selected: every inventory host, as the package CLI does
+        targets = _load_inventory()
+        if not targets:
+            raise ValueError(
+                "no targets: pass inventory_targets and/or container_images, or "
+                "add hosts to the inventory (see list_qna_targets)."
+            )
+        if len(targets) > MAX_QNA_TARGETS:
+            raise ValueError(
+                f"the inventory has {len(targets)} hosts, over the {MAX_QNA_TARGETS} "
+                "maximum per run; choose some with inventory_targets."
+            )
+        return targets
 
     if inventory_names:
         path = inventory_path()
         if not path:
             raise ValueError(
-                "inventory_targets were requested but no inventory is configured - "
-                "set BIGFIX_QNA_INVENTORY to a hosts.toml path on the server."
+                "inventory_targets were requested but no inventory was found - "
+                "create ~/.bigfix/remote_clients.toml or set BIGFIX_QNA_INVENTORY "
+                "to a remote_clients.toml path on the server."
             )
         by_name = {target.name: target for target in _load_inventory()}
         for name in inventory_names:

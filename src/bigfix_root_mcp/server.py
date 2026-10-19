@@ -913,12 +913,21 @@ if QNA_ENABLED:
     def list_qna_targets() -> dict:
         """List targets available to evaluate_client_relevance_qna.
 
-        Inventory entries are admin-configured on the server
-        (BIGFIX_QNA_INVENTORY); containers_allowed says whether arbitrary
-        container image names may be passed as targets.
+        inventory_path is the inventory file in use: BIGFIX_QNA_INVENTORY
+        when the server sets it, else the default search
+        (~/.bigfix/remote_clients.toml, then the all-users config directory);
+        null when none was found. A run that names no targets uses every
+        inventory host. auto_discovery says whether such a run, finding no
+        hosts, would first discover some (probing local qna, container images
+        and developer.bigfix.com, and writing ~/.bigfix/remote_clients.toml).
+        containers_allowed says whether arbitrary container image names may
+        be passed as targets. Listing never probes or writes anything.
         """
         return {
             "inventory": qna.list_inventory_targets(),
+            "inventory_path": qna.inventory_path() or None,
+            "inventory_source": qna.inventory_source(),
+            "auto_discovery": qna.discovery_allowed(),
             "containers_allowed": qna.containers_enabled(),
         }
 
@@ -934,7 +943,9 @@ if QNA_ENABLED:
             list[str] | None,
             Field(
                 description=(
-                    "Names from the admin-configured qna inventory (see list_qna_targets)."
+                    "Names from the server's qna inventory (see list_qna_targets). "
+                    "Leave both this and container_images empty to run on every "
+                    "inventory host."
                 )
             ),
         ] = None,
@@ -975,12 +986,34 @@ if QNA_ENABLED:
         from what client_query returns. Iterate on relevance syntax and
         inspector behavior here, then confirm on real agents with client_query.
 
+        With no inventory_targets or container_images, it runs on every
+        inventory host (qna only reads). If that finds no hosts and
+        list_qna_targets reports auto_discovery, the server first discovers
+        what works on its own host and records it in
+        ~/.bigfix/remote_clients.toml; the payload's auto_discovery says what
+        was added. That first run can take minutes.
+
         Per-target failures come back as result rows with error_kind
         ('relevance', 'qna', 'bootstrap', 'transport', 'resolve'), never as a
         tool error. ok_count and target_count describe the whole run; the rows
         are windowed by limit/offset.
         """
         advisory = analysis.preflight(relevance, dialect="client")
+        discovered = None
+        if not inventory_targets and not container_images and qna.discovery_needed():
+            await ctx.report_progress(
+                progress=0, message="No qna inventory hosts; running auto-discovery."
+            )
+            added = await qna.run_discovery()
+            discovered = {"path": qna.inventory_path() or None, "added": added}
+            # audit line: discovery runs qna locally, in containers and online
+            logger.info("BIGFIX QNA auto-discovery path=%s added=%s", discovered["path"], added)
+            if not added:
+                raise ValueError(
+                    "no targets: qna auto-discovery found nothing that works on this "
+                    "server; pass container_images, or add hosts to "
+                    f"{discovered['path'] or 'the inventory'} by hand."
+                )
         targets = qna.resolve_targets(inventory_targets, container_images)
         timeout_seconds = max(1, min(timeout_seconds, qna.MAX_QNA_TIMEOUT_SECONDS))
         pkg = qna._qna()  # the module's one lazy import seam
@@ -1016,6 +1049,8 @@ if QNA_ENABLED:
             "ok_count": sum(1 for r in results if r.get("error_kind") is None),
             "results": results,
         }
+        if discovered is not None:
+            payload["auto_discovery"] = discovered
         return _with_advisory(_bound_rows(payload, "results", limit, offset), advisory)
 
 

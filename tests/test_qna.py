@@ -11,6 +11,7 @@ import importlib
 import sys
 import types
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from fastmcp import Client
@@ -47,14 +48,21 @@ def make_fake_package():
         error_kind: str | None = None
         elapsed_ms: int = 5
 
+    class InventoryError(Exception):
+        pass
+
     fake.Target = Target
     fake.FakeResult = FakeResult
+    fake.InventoryError = InventoryError
     fake.inventory = []  # what load_inventory returns
+    fake.inventory_error = None  # raised by load_inventory instead, when set
     fake.scripted_results = []  # what the stream yields
     fake.calls = []  # (name, ...) tuples for assertions
 
     def load_inventory(path):
         fake.calls.append(("load_inventory", path))
+        if fake.inventory_error is not None:
+            raise fake.inventory_error
         return list(fake.inventory)
 
     def count_work(targets, qna_version=None):
@@ -81,11 +89,37 @@ def make_fake_package():
     return fake
 
 
+USER_INVENTORY = "/home/tester/.bigfix/remote_clients.toml"
+
+
 @pytest.fixture
 def fake_pkg(monkeypatch):
     fake = make_fake_package()
     monkeypatch.setitem(sys.modules, PKG, fake)
+    # the default search and auto-discovery live in the package's submodules,
+    # which a plain fake module has none of; script them at qna's own seams
+    fake.default_inventory = None  # what the default search finds
+    fake.discovered = []  # inventory auto-discovery "writes"
+
+    def find_default_inventory():
+        fake.calls.append(("find_default_inventory",))
+        return fake.default_inventory
+
+    def run_auto_discovery(path):
+        fake.calls.append(("run_auto_discovery", path))
+        fake.inventory = list(fake.discovered)
+        fake.inventory_error = None
+        fake.default_inventory = path
+        return [target.name for target in fake.discovered]
+
+    monkeypatch.setattr(qna, "_find_default_inventory", find_default_inventory)
+    monkeypatch.setattr(qna, "_run_auto_discovery", run_auto_discovery)
+    monkeypatch.setattr(qna, "_user_inventory_path", lambda: USER_INVENTORY)
     return fake
+
+
+def called(fake, name):
+    return [c for c in fake.calls if c[0] == name]
 
 
 @pytest.fixture
@@ -146,6 +180,30 @@ class TestResolveTargets:
         with pytest.raises(ValueError, match="target"):
             qna.resolve_targets(None, None)
 
+    def test_no_selection_means_every_inventory_host(self, fake_pkg, monkeypatch):
+        """qna is read-only, so like the CLI an unselected run covers the fleet."""
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
+        fake_pkg.inventory = [
+            fake_pkg.Target(kind="ssh", name="mac-test"),
+            fake_pkg.Target(kind="local", name="local"),
+        ]
+        targets = qna.resolve_targets(None, None)
+        assert [t.name for t in targets] == ["mac-test", "local"]
+
+    def test_no_selection_over_the_cap_is_refused(self, fake_pkg, monkeypatch):
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
+        fake_pkg.inventory = [
+            fake_pkg.Target(kind="ssh", name=f"h{i}") for i in range(qna.MAX_QNA_TARGETS + 1)
+        ]
+        with pytest.raises(ValueError, match="inventory_targets"):
+            qna.resolve_targets(None, None)
+
+    def test_explicit_containers_do_not_pull_in_the_inventory(self, fake_pkg, monkeypatch):
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
+        fake_pkg.inventory = [fake_pkg.Target(kind="ssh", name="mac-test")]
+        targets = qna.resolve_targets(None, ["ubuntu:22.04"])
+        assert [t.kind for t in targets] == ["container"]
+
     def test_too_many_targets_is_refused(self, fake_pkg):
         images = [f"img{i}:latest" for i in range(qna.MAX_QNA_TARGETS + 1)]
         with pytest.raises(ValueError, match=str(qna.MAX_QNA_TARGETS)):
@@ -160,7 +218,7 @@ def ungated(monkeypatch):
     base dependency, so it is always importable.
     """
     monkeypatch.setenv("BIGFIX_QNA_CONTAINERS", "0")
-    monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+    monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "0")
     reloaded = importlib.reload(server)
     yield reloaded
     monkeypatch.undo()
@@ -181,13 +239,123 @@ class TestQnaGate:
 
     async def test_gate_off_when_all_target_sources_disabled(self, fake_pkg, monkeypatch):
         monkeypatch.setenv("BIGFIX_QNA_CONTAINERS", "0")
-        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "0")
         assert qna.qna_enabled() is False
+
+    async def test_gate_on_with_only_the_default_inventory(self, fake_pkg, monkeypatch):
+        """Unset means the default search (and discovery), which is a source."""
+        monkeypatch.setenv("BIGFIX_QNA_CONTAINERS", "0")
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        assert qna.qna_enabled() is True
+        # the gate is read at import; it must not search or probe anything
+        assert not called(fake_pkg, "find_default_inventory")
 
     async def test_whoami_reports_the_gate_state(self, ungated, fake_conn):
         async with Client(ungated.mcp) as client:
             result = await client.call_tool("whoami", {})
         assert result.data["qna_enabled"] is False
+
+
+class TestInventoryPath:
+    """BIGFIX_QNA_INVENTORY wins; unset falls back to the CLI's default search."""
+
+    def test_configured_path_wins(self, fake_pkg, monkeypatch):
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
+        fake_pkg.default_inventory = USER_INVENTORY
+        assert qna.inventory_path() == "/etc/qna-hosts.toml"
+        assert not called(fake_pkg, "find_default_inventory")
+
+    @pytest.mark.parametrize("value", [None, "", "  "])
+    def test_unset_or_blank_uses_the_default_search(self, fake_pkg, monkeypatch, value):
+        if value is None:
+            monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        else:
+            monkeypatch.setenv("BIGFIX_QNA_INVENTORY", value)
+        fake_pkg.default_inventory = USER_INVENTORY
+        assert qna.inventory_path() == USER_INVENTORY
+
+    def test_default_search_finding_nothing_is_no_inventory(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        assert qna.inventory_path() == ""
+        assert qna.list_inventory_targets() == []
+
+    @pytest.mark.parametrize("value", ["0", "off", "false", "no", "NO"])
+    def test_off_values_disable_the_inventory(self, fake_pkg, monkeypatch, value):
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", value)
+        fake_pkg.default_inventory = USER_INVENTORY
+        assert qna.inventory_path() == ""
+        assert not qna.discovery_allowed()
+        assert not called(fake_pkg, "find_default_inventory")
+
+    def test_an_inventory_with_no_hosts_has_no_targets(self, fake_pkg, monkeypatch, tmp_path):
+        """Discovery leaves a comment-only placeholder when it finds nothing;
+        the package refuses to load it, but here it just means no hosts."""
+        placeholder = tmp_path / "remote_clients.toml"
+        placeholder.write_text("# no hosts found yet\n")
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", str(placeholder))
+        fake_pkg.inventory_error = fake_pkg.InventoryError("defines no [hosts.*] entries")
+        assert qna.list_inventory_targets() == []
+
+    def test_a_broken_inventory_still_fails(self, fake_pkg, monkeypatch, tmp_path):
+        broken = tmp_path / "remote_clients.toml"
+        broken.write_text("[hosts.a]\ntransport = 'ssh'\n[[[\n")
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", str(broken))
+        fake_pkg.inventory_error = fake_pkg.InventoryError("could not parse")
+        with pytest.raises(fake_pkg.InventoryError):
+            qna.list_inventory_targets()
+
+
+class TestAutoDiscovery:
+    """Discovery runs only for an unselected run that finds no inventory hosts."""
+
+    def test_allowed_by_default(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        monkeypatch.delenv("BIGFIX_QNA_AUTO_DISCOVERY", raising=False)
+        assert qna.discovery_allowed() is True
+
+    def test_switched_off(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        monkeypatch.setenv("BIGFIX_QNA_AUTO_DISCOVERY", "0")
+        assert qna.discovery_allowed() is False
+
+    def test_never_with_an_admin_pinned_inventory(self, fake_pkg, monkeypatch):
+        """Discovery writes ~/.bigfix; a pinned file is the admin's, not ours to grow."""
+        monkeypatch.setenv("BIGFIX_QNA_INVENTORY", "/etc/qna-hosts.toml")
+        assert qna.discovery_allowed() is False
+        assert qna.discovery_needed() is False
+
+    def test_needed_when_no_inventory_exists(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        assert qna.discovery_needed() is True
+
+    def test_needed_when_the_inventory_has_no_hosts(self, fake_pkg, monkeypatch, tmp_path):
+        placeholder = tmp_path / "remote_clients.toml"
+        placeholder.write_text("# no hosts found yet\n")
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        fake_pkg.default_inventory = str(placeholder)
+        fake_pkg.inventory_error = fake_pkg.InventoryError("defines no [hosts.*] entries")
+        assert qna.discovery_needed() is True
+
+    def test_not_needed_when_the_inventory_has_hosts(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
+        assert qna.discovery_needed() is False
+
+    async def test_run_writes_the_user_inventory(self, fake_pkg, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        fake_pkg.discovered = [fake_pkg.Target(kind="local", name="local")]
+        assert await qna.run_discovery() == ["local"]
+        assert called(fake_pkg, "run_auto_discovery") == [("run_auto_discovery", USER_INVENTORY)]
+        assert qna.inventory_path() == USER_INVENTORY
+
+    async def test_unwritable_location_is_a_value_error(self, fake_pkg, monkeypatch):
+        def refuse(path):
+            raise fake_pkg.InventoryError(f"cannot write {path}")
+
+        monkeypatch.setattr(qna, "_run_auto_discovery", refuse)
+        with pytest.raises(ValueError, match="auto-discovery"):
+            await qna.run_discovery()
 
 
 class TestEvaluateClientRelevanceQna:
@@ -288,6 +456,74 @@ class TestEvaluateClientRelevanceQna:
         assert result.data["inventory"] == [
             {"name": "mac-test", "kind": "ssh", "label": "mac-test"}
         ]
+        assert result.data["inventory_path"] == "/etc/qna-hosts.toml"
+        assert result.data["inventory_source"] == "BIGFIX_QNA_INVENTORY"
+        assert result.data["auto_discovery"] is False
+
+    async def test_list_qna_targets_reports_the_default_inventory(
+        self, gated, fake_pkg, monkeypatch
+    ):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
+        result = await call(gated, "list_qna_targets")
+        assert result.data["inventory_path"] == USER_INVENTORY
+        assert result.data["inventory_source"] == "default search"
+        assert result.data["auto_discovery"] is True
+        # listing never probes hosts or writes files
+        assert not called(fake_pkg, "run_auto_discovery")
+
+    async def test_no_targets_runs_on_every_inventory_host(self, gated, fake_pkg, caplog):
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [
+            fake_pkg.Target(kind="ssh", name="mac-test"),
+            fake_pkg.Target(kind="local", name="local"),
+        ]
+        fake_pkg.scripted_results = [
+            fake_pkg.FakeResult(host="mac-test"),
+            fake_pkg.FakeResult(host="local"),
+        ]
+        with caplog.at_level("INFO"):
+            result = await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+        assert result.data["target_count"] == 2
+        evaluate = called(fake_pkg, "evaluate")[0]
+        assert evaluate[2] == ("mac-test", "local")
+        assert not called(fake_pkg, "run_auto_discovery")
+        audit = [r.getMessage() for r in caplog.records if "BIGFIX QNA" in r.getMessage()]
+        assert any("mac-test" in line and "local" in line for line in audit)
+
+    async def test_no_targets_and_no_inventory_runs_discovery_first(self, gated, fake_pkg, caplog):
+        fake_pkg.discovered = [fake_pkg.Target(kind="local", name="local")]
+        fake_pkg.scripted_results = [fake_pkg.FakeResult(host="local")]
+        with caplog.at_level("INFO"):
+            result = await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+        assert called(fake_pkg, "run_auto_discovery") == [("run_auto_discovery", USER_INVENTORY)]
+        assert called(fake_pkg, "evaluate")[0][2] == ("local",)
+        assert result.data["auto_discovery"] == {"path": USER_INVENTORY, "added": ["local"]}
+        audit = [r.getMessage() for r in caplog.records if "BIGFIX QNA" in r.getMessage()]
+        assert any("auto-discovery" in line for line in audit)
+
+    async def test_discovery_finding_nothing_is_a_clear_error(self, gated, fake_pkg):
+        with pytest.raises(ToolError, match="auto-discovery"):
+            await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+        assert not called(fake_pkg, "evaluate")
+
+    async def test_explicit_targets_never_run_discovery(self, gated, fake_pkg):
+        fake_pkg.scripted_results = [fake_pkg.FakeResult(host="container:ubuntu:22.04")]
+        await call(
+            gated,
+            "evaluate_client_relevance_qna",
+            {"relevance": "true", "container_images": ["ubuntu:22.04"]},
+        )
+        assert not called(fake_pkg, "run_auto_discovery")
+
+    async def test_discovery_switched_off_is_an_error_not_a_probe(
+        self, gated, fake_pkg, monkeypatch
+    ):
+        monkeypatch.setenv("BIGFIX_QNA_AUTO_DISCOVERY", "0")
+        with pytest.raises(ToolError, match="target"):
+            await call(gated, "evaluate_client_relevance_qna", {"relevance": "true"})
+        assert not called(fake_pkg, "run_auto_discovery")
 
 
 class TestRealPackageContract:
@@ -323,6 +559,37 @@ class TestRealPackageContract:
             timeout_s=30,
         )
         inspect.signature(real_pkg.result_to_dict).bind(object(), max_raw_output=4000)
+
+    def test_discovery_calls_match_the_real_signatures(self):
+        import inspect
+
+        from bigfix_remote_client_relevance import discovery, inventory_paths
+
+        inspect.signature(discovery.run_auto_discovery).bind(Path("x.toml"))
+        inspect.signature(inventory_paths.user_inventory_path).bind()
+        assert issubclass(
+            importlib.import_module(f"{PKG}.inventory").EmptyInventoryError,
+            importlib.import_module(PKG).InventoryError,
+        )
+
+    def test_default_search_skips_the_working_directory(self, monkeypatch, tmp_path):
+        """An MCP server's cwd is wherever its client launched it."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "remote_clients.toml").write_text("[hosts.cwd]\ntransport = 'local'\n")
+        assert qna._find_default_inventory() is None
+
+    def test_default_search_finds_the_user_inventory(self, isolated_home):
+        user = isolated_home / ".bigfix" / "remote_clients.toml"
+        user.parent.mkdir()
+        user.write_text("[hosts.local]\ntransport = 'local'\n")
+        assert Path(qna._find_default_inventory()) == user
+        assert Path(qna._user_inventory_path()) == user
+
+    def test_default_search_never_sees_the_real_site_config(self, isolated_home):
+        """conftest points the all-users config dir into the tmp HOME."""
+        import platformdirs
+
+        assert Path(platformdirs.site_config_dir("bigfix")).is_relative_to(isolated_home)
 
     def test_container_targets_build_with_the_real_target(self):
         targets = qna.resolve_targets(None, ["ubuntu:22.04"])

@@ -1,6 +1,7 @@
 """Shared test fakes: scriptable stand-ins for besapi's BESConnection."""
 
 import lxml.objectify
+import platformdirs
 import pytest
 
 import bigfix_root_mcp.connection as connection_module
@@ -98,6 +99,13 @@ def isolated_home(monkeypatch, tmp_path_factory):
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    # the qna inventory search also looks in the all-users config directory
+    # (/Library/Application Support/bigfix, /etc/xdg/bigfix, ...)
+    site = home / "site-config"
+    monkeypatch.setattr(
+        platformdirs, "site_config_dir", lambda appname="", *_a, **_k: str(site / appname)
+    )
+    monkeypatch.delenv("SUDO_USER", raising=False)
     return home
 
 

@@ -233,12 +233,37 @@ Design choices:
   lazily through one seam (`qna._qna()`), and tools register only when the
   package is importable *and* a target source is allowed - same "registered
   tools are the boundary" pattern as writes.
-- **Target policy: admin inventory plus container images.** Inventory
-  entries come from a hosts.toml named by `BIGFIX_QNA_INVENTORY` and pass
-  through exactly as the admin wrote them; callers may add container image
-  names (validated against an image-reference pattern). The package's
-  `Target` constructor is never exposed to tool parameters: no
-  caller-supplied ssh hosts, users, or become flags.
+- **Target policy: server-side inventory plus container images.** Inventory
+  entries come from a remote_clients.toml on the server and pass through
+  exactly as written; callers may add container image names (validated
+  against an image-reference pattern). The package's `Target` constructor is
+  never exposed to tool parameters: no caller-supplied ssh hosts, users, or
+  become flags.
+- **Same default inventory as the package CLI.** `BIGFIX_QNA_INVENTORY`
+  wins; unset, the server uses `find_inventory_path()`'s search
+  (`~/.bigfix/remote_clients.toml`, then the all-users config directory),
+  so the file a user already set up for the CLI just works. The CLI's
+  first candidate, `./remote_clients.toml`, is skipped: an MCP server's
+  working directory is arbitrary, so a file there was never chosen for it.
+  `BIGFIX_QNA_INVENTORY=0` turns the inventory off. The registration gate
+  never searches (it is read at import), it only checks the inventory isn't
+  disabled.
+- **No targets means every inventory host.** qna only reads, so an
+  unselected run covers the fleet, as the CLI does, capped at
+  `MAX_QNA_TARGETS` like any run. The audit line lists every target.
+- **Auto-discovery when no hosts are found.** An unselected run that finds no
+  inventory hosts (no file, or one with no `[hosts.*]` such as discovery's
+  own placeholder) first runs the package's non-interactive
+  `run_auto_discovery` into `~/.bigfix/remote_clients.toml`, off the event
+  loop, with its own audit line. This makes the server write a user file and
+  probe local qna, container images and developer.bigfix.com. That was
+  accepted because it is the CLI's documented first-run behavior for the
+  same file. It is bounded: it never runs with a `BIGFIX_QNA_INVENTORY` path
+  (the admin's file), never runs for explicit targets or `list_qna_targets`,
+  never uses the interactive SSH discovery, and `BIGFIX_QNA_AUTO_DISCOVERY=0`
+  turns it off. Unlike the CLI it repeats while the inventory has no hosts,
+  so a placeholder doesn't block it once whatever kept it from finding any
+  is fixed.
 - **Containers default on.** Containers are ephemeral and run on the
   operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.
