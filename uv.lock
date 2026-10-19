@@ -243,7 +243,7 @@ wheels = [
 
 [[package]]
 name = "bigfix-remote-session-relevance"
-version = "0.5.1"
+version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -253,9 +253,9 @@ dependencies = [
     { name = "httpx" },
     { name = "tomlkit" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/24/10c790b010220ffa921208d5eccd9a47b52a9faa8dd9962c29a917e55a65/bigfix_remote_session_relevance-0.5.1.tar.gz", hash = "sha256:c58f36c4024b343cda5625b2ccf003087891752a5f03079b2e10f6b8f1a27d4f", size = 196506, upload-time = "2026-10-19T19:37:03.684Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/55/c48dc1387c036410a9fe22f6600e78b8eec4ecf181627add25cb3a2849ad/bigfix_remote_session_relevance-0.5.2.tar.gz", hash = "sha256:7ca6bd0b86573eef2ca4d5320b5301a4635dc9e22a9d1f76591893ab24f4f68c", size = 197693, upload-time = "2026-10-19T20:00:55.552Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/82/cb5acba4b6dd3e1dde8eebf818e71d7969fc414a31fe10eeaceb75efe2e2/bigfix_remote_session_relevance-0.5.1-py3-none-any.whl", hash = "sha256:1104f7a4587d96d36e595df4c5292ae56c49967fdc3990535c1257d21a20cc34", size = 76136, upload-time = "2026-10-19T19:37:02.54Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/05/af3e04f47db7ea25d60f5e8b3c6c0e6a918acaccac59e35d8d61a0fe5012/bigfix_remote_session_relevance-0.5.2-py3-none-any.whl", hash = "sha256:496e094126db9971be857d99de162526e584e6a95d0c6c3258c44a5b399ebcd6", size = 76362, upload-time = "2026-10-19T20:00:54.079Z" },
 ]
 
 [[package]]
@@ -295,7 +295,7 @@ requires-dist = [
     { name = "bigfix-relevance-analyzer", specifier = ">=1.38.1,<2" },
     { name = "bigfix-remote-client-relevance", specifier = ">=1.5.4,<2" },
     { name = "bigfix-remote-client-relevance", marker = "extra == 'qna'", specifier = ">=1.5.4,<2" },
-    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.1,<2" },
+    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.2,<2" },
     { name = "fastmcp", specifier = "==4.0.3" },
     { name = "lxml" },
     { name = "pydantic" },

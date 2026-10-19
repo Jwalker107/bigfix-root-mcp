@@ -16,7 +16,7 @@ EXPECTED = {
     "bigfix-relevance-analyzer": ">=1.38.1,<2",
     # 1.x is announced as contract-compatible with 0.5, so the cap is the
     # next major after it rather than the next one after 0.x
-    "bigfix-remote-session-relevance": ">=0.5.1,<2",
+    "bigfix-remote-session-relevance": ">=0.5.2,<2",
     "bigfix-remote-client-relevance": ">=1.5.4,<2",
 }
 
