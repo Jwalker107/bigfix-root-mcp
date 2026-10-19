@@ -269,6 +269,13 @@ Design choices:
   `qna_discover_targets` is not registered (same "registered tools are the
   boundary" rule as writes, rechecked per call). It never runs from
   `qna_list_targets` and never as the interactive SSH discovery.
+- **Point at discovery when a run comes up empty.** A run that finds no
+  targets in an existing inventory, or returns no result rows (error rows
+  count as results), suggests `qna_discover_targets`. If discovery ran within
+  `DISCOVERY_RECENT_SECONDS` (15 minutes), it says what that run added and
+  where hosts go instead, since repeating a minutes-long probe would likely
+  find the same. The last run is remembered in process memory only, because
+  the server writes no state of its own; a restart forgets it.
 - **Containers default on.** Containers are ephemeral and run on the
   operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.

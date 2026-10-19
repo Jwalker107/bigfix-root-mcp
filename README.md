@@ -322,7 +322,11 @@ Targets are deliberately constrained:
   `--auto-discovery`). With a `BIGFIX_QNA_INVENTORY` path (that file is the
   admin's) or `BIGFIX_QNA_AUTO_DISCOVERY=0` it never runs and that tool is
   not registered. It never uses the interactive SSH discovery and never
-  prompts.
+  prompts. When a `qna_eval_client_relevance` run finds no targets (an empty
+  inventory, a name missing from an empty one) or returns no result rows at
+  all, the error or the payload's `hint` suggests `qna_discover_targets`.
+  Error rows count as results. If discovery ran in the last 15 minutes, it
+  says what that run added and where to add hosts by hand instead.
 
 Security notes: qna executes on the targets; the controller downloads BigFix
 agent artifacts from support.bigfix.com (SHA256-verified against the release

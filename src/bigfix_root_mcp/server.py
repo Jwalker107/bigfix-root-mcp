@@ -1061,6 +1061,10 @@ if QNA_ENABLED:
         }
         if discovered is not None:
             payload["auto_discovery"] = discovered
+        if not results:
+            # error rows count as results; only a run that returned none at
+            # all gets pointed at discovery
+            payload["hint"] = "No target returned a result." + qna.discovery_hint()
         return _with_advisory(_bound_rows(payload, "results", limit, offset), advisory)
 
 

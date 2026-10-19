@@ -115,7 +115,20 @@ def fake_pkg(monkeypatch):
     monkeypatch.setattr(qna, "_find_default_inventory", find_default_inventory)
     monkeypatch.setattr(qna, "_run_auto_discovery", run_auto_discovery)
     monkeypatch.setattr(qna, "_user_inventory_path", lambda: USER_INVENTORY)
+    # discovery's last run is remembered per process; each test starts fresh
+    monkeypatch.setattr(qna, "_last_discovery", None)
+    fake.now = 1000.0
+    monkeypatch.setattr(qna, "_clock", lambda: fake.now)
     return fake
+
+
+def empty_inventory(fake, tmp_path):
+    """An existing inventory with no hosts, e.g. discovery's placeholder."""
+    placeholder = tmp_path / "remote_clients.toml"
+    placeholder.write_text("# no hosts found yet\n")
+    fake.default_inventory = str(placeholder)
+    fake.inventory_error = fake.InventoryError("defines no [hosts.*] entries")
+    return str(placeholder)
 
 
 def called(fake, name):
@@ -519,6 +532,73 @@ class TestQnaEvalClientRelevance:
         with pytest.raises(ToolError, match="qna_discover_targets"):
             await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
         assert not called(fake_pkg, "run_auto_discovery")
+
+    async def test_unknown_name_in_an_empty_inventory_suggests_discovery(
+        self, gated, fake_pkg, tmp_path
+    ):
+        empty_inventory(fake_pkg, tmp_path)
+        with pytest.raises(ToolError, match="qna_discover_targets"):
+            await call(
+                gated,
+                "qna_eval_client_relevance",
+                {"relevance": "true", "inventory_targets": ["mac-test"]},
+            )
+
+    async def test_unknown_name_in_a_populated_inventory_does_not(self, gated, fake_pkg):
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
+        with pytest.raises(ToolError) as excinfo:
+            await call(
+                gated,
+                "qna_eval_client_relevance",
+                {"relevance": "true", "inventory_targets": ["mac-test"]},
+            )
+        assert "qna_discover_targets" not in str(excinfo.value)
+
+    async def test_no_hint_after_a_recent_discovery(self, gated, fake_pkg, tmp_path):
+        """Suggesting the run that just found nothing would be a loop."""
+        path = empty_inventory(fake_pkg, tmp_path)
+        await call(gated, "qna_discover_targets")  # finds nothing
+        empty_inventory(fake_pkg, tmp_path)
+        fake_pkg.now += 60
+        with pytest.raises(ToolError) as excinfo:
+            await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
+        message = str(excinfo.value)
+        assert "ran 1 minute ago" in message
+        assert "run qna_discover_targets" not in message
+        assert path in message  # where to add hosts by hand
+
+    async def test_hint_returns_once_the_discovery_is_old(self, gated, fake_pkg, tmp_path):
+        empty_inventory(fake_pkg, tmp_path)
+        await call(gated, "qna_discover_targets")
+        empty_inventory(fake_pkg, tmp_path)
+        fake_pkg.now += qna.DISCOVERY_RECENT_SECONDS + 1
+        with pytest.raises(ToolError, match="run qna_discover_targets"):
+            await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
+
+    async def test_no_hint_when_discovery_is_off(self, gated, fake_pkg, monkeypatch, tmp_path):
+        monkeypatch.setenv("BIGFIX_QNA_AUTO_DISCOVERY", "0")
+        empty_inventory(fake_pkg, tmp_path)
+        with pytest.raises(ToolError) as excinfo:
+            await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
+        assert "qna_discover_targets" not in str(excinfo.value)
+
+    async def test_a_run_with_no_result_rows_suggests_discovery(self, gated, fake_pkg):
+        """Error rows are results; only a run that returns none gets the hint."""
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
+        fake_pkg.scripted_results = []
+        result = await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
+        assert "qna_discover_targets" in result.data["hint"]
+
+    async def test_error_rows_get_no_hint(self, gated, fake_pkg):
+        fake_pkg.default_inventory = USER_INVENTORY
+        fake_pkg.inventory = [fake_pkg.Target(kind="local", name="local")]
+        fake_pkg.scripted_results = [
+            fake_pkg.FakeResult(host="local", error="unreachable", error_kind="transport")
+        ]
+        result = await call(gated, "qna_eval_client_relevance", {"relevance": "true"})
+        assert "hint" not in result.data
 
     async def test_list_reports_pending_first_run_discovery(self, gated, fake_pkg):
         result = await call(gated, "qna_list_targets")

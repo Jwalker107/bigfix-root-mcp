@@ -27,6 +27,7 @@ import importlib.util
 import os
 import re
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -34,12 +35,20 @@ MAX_QNA_TIMEOUT_SECONDS = 300
 MAX_QNA_TARGETS = 20
 MAX_PARALLEL = 8
 MAX_RAW_OUTPUT = 4000
+# within this long of a discovery, a run finding no targets says what that
+# discovery found instead of suggesting another (it can take minutes)
+DISCOVERY_RECENT_SECONDS = 15 * 60
 
 # docker/podman image references: name[:tag][@digest]. Anything a shell could
 # interpret (spaces, semicolons, quotes) fails this and is refused.
 _IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
 
 _PACKAGE = "bigfix_remote_client_relevance"
+
+_clock = time.monotonic
+# (when, hosts added) of this process's last discovery: memory only, since
+# the server writes nothing of its own; a restart forgets it
+_last_discovery: tuple[float, list[str]] | None = None
 
 
 def package_available() -> bool:
@@ -196,11 +205,36 @@ async def run_discovery() -> list[str]:
     It probes this machine's qna, the container engine's images and
     developer.bigfix.com, which takes a while: off the event loop it goes.
     """
+    global _last_discovery  # noqa: PLW0603 - per-process memory, by design
     pkg = _qna()
     try:
-        return await asyncio.to_thread(_run_auto_discovery, _user_inventory_path())
+        added = await asyncio.to_thread(_run_auto_discovery, _user_inventory_path())
     except pkg.InventoryError as exc:
         raise ValueError(f"qna auto-discovery failed: {exc}") from exc
+    _last_discovery = (_clock(), list(added))
+    return added
+
+
+def discovery_hint() -> str:
+    """A sentence to append when a run finds no targets; "" without discovery.
+
+    Suggests qna_discover_targets, unless it ran recently: then repeating it
+    would likely find the same, so say what it found and where hosts go.
+    """
+    if not discovery_allowed():
+        return ""
+    if _last_discovery is not None:
+        when, added = _last_discovery
+        age = _clock() - when
+        if age < DISCOVERY_RECENT_SECONDS:
+            minutes = max(1, round(age / 60))
+            ago = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+            found = ", ".join(added) or "nothing new"
+            where = inventory_path() or _user_inventory_path()
+            return (
+                f" qna_discover_targets ran {ago} and added {found}; add hosts to {where} by hand."
+            )
+    return " To find targets that work on this server, run qna_discover_targets."
 
 
 def list_inventory_targets() -> list[dict]:
@@ -225,10 +259,9 @@ def resolve_targets(inventory_names: list[str] | None, container_images: list[st
         # nothing selected: every inventory host, as the package CLI does
         targets = _load_inventory()
         if not targets:
-            hint = " or run qna_discover_targets," if discovery_allowed() else ""
             raise ValueError(
-                "no targets: pass inventory_targets and/or container_images,"
-                f"{hint} or add hosts to the inventory (see qna_list_targets)."
+                "no targets: pass inventory_targets and/or container_images, or add "
+                f"hosts to the inventory (see qna_list_targets).{discovery_hint()}"
             )
         if len(targets) > MAX_QNA_TARGETS:
             raise ValueError(
@@ -250,7 +283,10 @@ def resolve_targets(inventory_names: list[str] | None, container_images: list[st
             target = by_name.get(name)
             if target is None:
                 known = ", ".join(sorted(by_name)) or "(none)"
-                raise ValueError(f"unknown inventory target {name!r}; inventory has: {known}")
+                hint = "" if by_name else discovery_hint()
+                raise ValueError(
+                    f"unknown inventory target {name!r}; inventory has: {known}.{hint}"
+                )
             targets.append(target)
 
     if container_images:
