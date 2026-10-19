@@ -2,7 +2,10 @@
 
 A minimal, read-only MCP server around the [besapi](https://github.com/jgstew/besapi)
 library, exposing the HCL BigFix root server REST API to MCP clients. Built on
-[FastMCP](https://gofastmcp.com) 4 (stateless).
+[FastMCP](https://gofastmcp.com) 4 (stateless). Session relevance is evaluated
+with [bigfix-remote-session-relevance](https://github.com/jgstew/bigfix-remote-session-relevance)
+(see [Session relevance](#session-relevance)); every other REST call goes
+through besapi.
 
 Focus: **session relevance** queries (data the server already has) and
 **client fast query** (live questions answered by BigFix agents), plus a few
@@ -16,7 +19,7 @@ The capabilities of this MCP server are intentionally limited, where as the offi
 
 | Tool | Purpose |
 | --- | --- |
-| `session_relevance_query` | Evaluate session relevance on the root server; returns the JSON envelope (`result`, `evaltime_ms`). |
+| `session_relevance_query` | Evaluate session relevance on the root server; returns the JSON envelope (`result`, `count`, `plural`, `type`, `evaltime_ms`). |
 | `analyze_relevance` | Statically analyze a relevance expression offline - parse, types, dialect, unknown inspectors with suggestions, complexity. Never evaluates it. |
 | `search_inspectors` | Fuzzy-search the offline inspector reference by name or phrase. |
 | `client_query_submit` | Submit a client fast query, return its `query_id` immediately. |
@@ -52,9 +55,10 @@ adds nothing. Server-side relevance errors gain a `Static analysis:` appendix
 with the findings and did-you-mean suggestions, so a typo'd inspector is a
 one-round-trip fix.
 
-### qna fast evaluation (opt-in)
+### qna fast evaluation
 
-Absent unless the `[qna]` extra is installed - see [qna evaluation](#qna-evaluation).
+Registered by default; absent when every target source is disabled - see
+[qna evaluation](#qna-evaluation).
 
 | Tool | Purpose |
 | --- | --- |
@@ -131,9 +135,9 @@ Environment variables win over config files:
 | REST operator | `BES_USER_NAME` | - |
 | Password | `BES_PASSWORD` | - |
 | Write tools | `BIGFIX_ALLOW_WRITES`: `true` to register them | off |
-| TLS verification | `BES_SSL_VERIFY`: `false`, `true`, or a CA bundle path | `false` (besapi default) |
+| TLS verification | `BES_SSL_VERIFY`: `tofu`, `false`, `true`, or a CA bundle path. `tofu` (or unset) pins self-signed certs on first use for session relevance only; besapi treats it as `false`. See [Safety and design notes](#safety-and-design-notes) | unset (`tofu`) |
 | qna inventory | `BIGFIX_QNA_INVENTORY`: path to a hosts.toml (see [qna evaluation](#qna-evaluation)) | unset |
-| qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on when `[qna]` installed |
+| qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
 Config files are searched in besapi's order: `/etc/besapi.conf`,
@@ -236,17 +240,46 @@ this caveat so LLM clients don't overstate scoped results.
   a required `site_path` parameter.
 - **Stdout hygiene**: stdout belongs to the MCP stdio transport; all logging
   goes to stderr, and config loading avoids besapi helpers that print.
-- **TLS**: verification is off by default to match besapi; set
-  `BES_SSL_VERIFY=true` (or a CA bundle path) for anything beyond a lab.
+- **TLS**: with `BES_SSL_VERIFY` unset (or `tofu`), session relevance
+  trusts on first use: a CA-valid certificate is used as is, a self-signed
+  one (the BigFix default) is pinned on first contact in
+  `~/.bigfix/.remote_session_known_certs.toml` - shared with the
+  bigfix-remote-session-relevance CLI - and a different certificate later is
+  refused before any credentials are sent. Remove the entry (or run
+  `bigfix-remote-session-relevance --forget-cert HOST:PORT`) once a
+  legitimately changed certificate is verified out of band. The besapi tools
+  have no pinning and stay unverified in that mode, matching besapi. An
+  explicit `false` turns verification off for both; `true` (honouring
+  `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE`) or a CA bundle path verifies both
+  and pins nothing - use one of those for anything beyond a lab.
+  `HTTPS_PROXY` / `NO_PROXY` are honoured by the besapi tools only; session
+  relevance connects directly.
 - Generic BigFix logic here is written to be upstreamed into besapi - see
   [docs/besapi-proposals.md](docs/besapi-proposals.md).
 
+## Session relevance
+
+`session_relevance_query`, `find_computers` and `find_content` evaluate
+through the REST backend of
+[bigfix-remote-session-relevance](https://github.com/jgstew/bigfix-remote-session-relevance),
+using the same connection settings as everything else (env vars or
+`besapi.conf`); its own `~/.bigfix` config, certificate pinning and
+deployment discovery are not used. The reason is the root server's
+behaviour when it can reach a BigFix Explorer: it forwards `/api/query` to
+Explorer, which rejects besapi's double-encoded form post with "This
+expression contained a character which is not allowed" - in practice any
+query containing a space. The library sends a JSON body first and falls back
+to besapi's form encoding only when the server answers "no reachable BigFix
+Explorer", so both setups evaluate the query exactly as written.
+
 ## qna evaluation
 
-`pip install "bigfix-root-mcp[qna]"` adds
 [bigfix-remote-client-relevance](https://github.com/jgstew/bigfix-remote-client-relevance)
-and registers `evaluate_client_relevance_qna` / `list_qna_targets` (with the
-extra absent, the tools do not exist). It evaluates **client** relevance with
+is a base dependency, so `evaluate_client_relevance_qna` / `list_qna_targets`
+are registered by default; they are absent only when both target sources are
+off (no `BIGFIX_QNA_INVENTORY` and `BIGFIX_QNA_CONTAINERS=0`). The `[qna]`
+extra still exists so older install commands keep working, but adds nothing.
+It evaluates **client** relevance with
 the BigFix `qna` binary on lab targets in about a second per warm run - the
 fast half of the feedback loop next to the advisory analysis.
 

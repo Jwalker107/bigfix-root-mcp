@@ -14,8 +14,9 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
-bigfix-relevance-analyzer = { timestamp = "0001-01-01T00:00:00Z", span = "PT1H" }
-bigfix-remote-client-relevance = { timestamp = "0001-01-01T00:00:00Z", span = "PT1H" }
+bigfix-relevance-analyzer = false
+bigfix-remote-client-relevance = false
+bigfix-remote-session-relevance = false
 
 [manifest]
 constraints = [{ name = "fastmcp-slim", specifier = ">=4.0.0b1" }]
@@ -212,16 +213,16 @@ wheels = [
 
 [[package]]
 name = "bigfix-relevance-analyzer"
-version = "1.14.2"
+version = "1.38.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b0/0b/769ada5fa77a9ab219b5b38fd595c289905b32d88c856a6c64c15969bb3d/bigfix_relevance_analyzer-1.14.2.tar.gz", hash = "sha256:ca4112cc64ee42e1ef6d1fc82ed5985712e52e65d4c40525040575056766fe28", size = 1011948, upload-time = "2026-10-02T22:41:45.981Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/82/4aa7e87dcb79bb2bf09e4221f732cf3339050f250672e01da1aefcb946e4/bigfix_relevance_analyzer-1.38.1.tar.gz", hash = "sha256:95c7428dac9a8239b131db25bbb89f9608facee49690652e14678beae7e4734d", size = 1456698, upload-time = "2026-10-14T20:53:44.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/5d/cc54ec36dd445056b06d3482968faf7e57a796b8108d9e1ef0f02bca238f/bigfix_relevance_analyzer-1.14.2-py3-none-any.whl", hash = "sha256:1222ef7f4d55b0d5b24e486694efc16f939b8a5acc1d50d766d97dba746f3eea", size = 329483, upload-time = "2026-10-02T22:41:44.812Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/8e/db6adfb98c5db6bef7727f8cc0b7b41ebffd59bf104b32d7e40f709c7410/bigfix_relevance_analyzer-1.38.1-py3-none-any.whl", hash = "sha256:bd3e639cfa08a86a5f4c7d08961ac21e387cec2ea3dcfb78a9a3b19c71d75094", size = 440432, upload-time = "2026-10-14T20:53:43.258Z" },
 ]
 
 [[package]]
 name = "bigfix-remote-client-relevance"
-version = "1.3.5"
+version = "1.5.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asyncssh" },
@@ -233,11 +234,28 @@ dependencies = [
     { name = "rpmfile" },
     { name = "tomlkit" },
     { name = "typer" },
-    { name = "zstandard" },
+    { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/65/f13122cfd97db5532f4c677bb6218755abdf411e45b872568d91089f380e/bigfix_remote_client_relevance-1.3.5.tar.gz", hash = "sha256:30baef454da8f99da861eec9a2dc1d41693758a1f082d63c54ad122fe03e20b6", size = 425811, upload-time = "2026-10-03T19:44:37.803Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/61/0d/e60de6d63e31bfa3c3607398f8defe8cd4694bbcc6131ec01bd945d1777a/bigfix_remote_client_relevance-1.5.4.tar.gz", hash = "sha256:6fa460e50a457e35aeb065576643efe3618eaf21d8a48ab592e791d4ade63a2a", size = 476544, upload-time = "2026-10-13T20:15:46.68Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/f5/6c4302f6be2b614194b23a8b2102ef8d0a22f7041658c916e1059693946e/bigfix_remote_client_relevance-1.3.5-py3-none-any.whl", hash = "sha256:b6fd6265eab7d0cb257d337c3b1a65c23da542c1399c5e62d07e63800bbd2fb9", size = 124935, upload-time = "2026-10-03T19:44:36.523Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/fe/0f5b13c4caee1255cae2207b838b7f8273537748b80fadb99359cd205326/bigfix_remote_client_relevance-1.5.4-py3-none-any.whl", hash = "sha256:da9fa2552664d38cdb81013bf6ab02e6d91e1da71e30bc43ac3be3f6c34f705c", size = 153259, upload-time = "2026-10-13T20:15:45.001Z" },
+]
+
+[[package]]
+name = "bigfix-remote-session-relevance"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "certifi" },
+    { name = "defusedxml" },
+    { name = "filelock" },
+    { name = "httpx" },
+    { name = "tomlkit" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/55/c48dc1387c036410a9fe22f6600e78b8eec4ecf181627add25cb3a2849ad/bigfix_remote_session_relevance-0.5.2.tar.gz", hash = "sha256:7ca6bd0b86573eef2ca4d5320b5301a4635dc9e22a9d1f76591893ab24f4f68c", size = 197693, upload-time = "2026-10-19T20:00:55.552Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/05/af3e04f47db7ea25d60f5e8b3c6c0e6a918acaccac59e35d8d61a0fe5012/bigfix_remote_session_relevance-0.5.2-py3-none-any.whl", hash = "sha256:496e094126db9971be857d99de162526e584e6a95d0c6c3258c44a5b399ebcd6", size = 76362, upload-time = "2026-10-19T20:00:54.079Z" },
 ]
 
 [[package]]
@@ -247,6 +265,8 @@ source = { editable = "." }
 dependencies = [
     { name = "besapi" },
     { name = "bigfix-relevance-analyzer" },
+    { name = "bigfix-remote-client-relevance" },
+    { name = "bigfix-remote-session-relevance" },
     { name = "fastmcp" },
     { name = "lxml" },
     { name = "pydantic" },
@@ -272,8 +292,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "besapi", specifier = ">=4.1.5" },
-    { name = "bigfix-relevance-analyzer", specifier = ">=1.8.3,<2" },
-    { name = "bigfix-remote-client-relevance", marker = "extra == 'qna'", specifier = ">=1.1.2,<2" },
+    { name = "bigfix-relevance-analyzer", specifier = ">=1.38.1,<2" },
+    { name = "bigfix-remote-client-relevance", specifier = ">=1.5.4,<2" },
+    { name = "bigfix-remote-client-relevance", marker = "extra == 'qna'", specifier = ">=1.5.4,<2" },
+    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.2,<2" },
     { name = "fastmcp", specifier = "==4.0.3" },
     { name = "lxml" },
     { name = "pydantic" },
@@ -826,6 +848,15 @@ wheels = [
 ]
 
 [[package]]
+name = "defusedxml"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
 name = "distlib"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -983,6 +1014,19 @@ wheels = [
 ]
 
 [[package]]
+name = "httpcore"
+version = "1.0.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "h11" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784, upload-time = "2025-04-24T22:06:20.566Z" },
+]
+
+[[package]]
 name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -993,6 +1037,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/74/d370e55600d9bcfa0d9794b0166126d49291a3d2b20c268fc98c453a4948/httpcore2-2.12.0-py3-none-any.whl", hash = "sha256:7e04258ce01013d7d615e5b910a3b27fac937d7a95038227e79652b4ba3b4ceb", size = 83074, upload-time = "2026-08-18T13:22:05.854Z" },
+]
+
+[[package]]
+name = "httpx"
+version = "0.28.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "certifi" },
+    { name = "httpcore" },
+    { name = "idna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517, upload-time = "2024-12-06T15:37:21.509Z" },
 ]
 
 [[package]]

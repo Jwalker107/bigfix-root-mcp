@@ -226,23 +226,25 @@ lab targets - it never touches the BigFix deployment (the package's
 FastQuery transport is an upstream stub and is deliberately unexposed).
 Design choices:
 
-- **Optional extra, registration-gated.** The package drags docker/asyncssh,
-  so it lives in the `[qna]` extra, imported lazily through one seam
-  (`qna._qna()`). Tools register only when the package is importable *and* a
-  target source is allowed - same "registered tools are the boundary"
-  pattern as writes.
+- **Base dependency, registration-gated.** The package was once an optional
+  `[qna]` extra because it drags docker/asyncssh; it is now a base dependency
+  so fast client relevance testing is available out of the box (the empty
+  `[qna]` extra remains for old install commands). It is still imported
+  lazily through one seam (`qna._qna()`), and tools register only when the
+  package is importable *and* a target source is allowed - same "registered
+  tools are the boundary" pattern as writes.
 - **Target policy: admin inventory plus container images.** Inventory
   entries come from a hosts.toml named by `BIGFIX_QNA_INVENTORY` and pass
   through exactly as the admin wrote them; callers may add container image
   names (validated against an image-reference pattern). The package's
   `Target` constructor is never exposed to tool parameters: no
   caller-supplied ssh hosts, users, or become flags.
-- **Containers default on.** Installing the extra is the opt-in act -
-  containers are ephemeral and run on the operator's own engine. Set
+- **Containers default on.** Containers are ephemeral and run on the
+  operator's own engine; without docker/podman a run fails cleanly. Set
   `BIGFIX_QNA_CONTAINERS=0` to restrict targets to the inventory file.
 - **Audit line per run** (`BIGFIX QNA ...` on stderr), mirroring the write
   audit: qna executes a binary on targets and downloads agent artifacts.
 
 Tests fake the package at the `sys.modules` seam (`tests/test_qna.py`), so
-the suite needs neither the extra nor docker; the gate reload pattern is the
+the suite needs no docker; the gate reload pattern is the
 same as `tests/test_writes.py`.

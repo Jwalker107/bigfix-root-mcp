@@ -65,11 +65,19 @@ Relevance **errors are returned by the server with HTTP 200** and an `error`
 key in the JSON envelope, which is why `errors.check_relevance_envelope()`
 exists - status-code checking alone will not catch a bad query.
 
+This server no longer calls `session_relevance_json`: session relevance
+goes through bigfix-remote-session-relevance (`sessionrelevance.py`).
+
 `session_relevance_json` percent-encodes the relevance with
 `urllib.parse.quote()` and then passes it as a form-dict value, which
-percent-encodes again. This looked like a double-encoding bug; **it was tested
-against a live server and round-trips correctly**, including relevance
-containing spaces, `+`, and `%25`. Leave it alone. (Note that a literal `%` in
+percent-encodes again. That round-trips correctly on a root server **without**
+a reachable BigFix Explorer, including relevance containing spaces, `+`, and
+`%25`. A root server **with** a reachable Explorer forwards the query to it,
+which decodes only once, so every query containing a space fails with "This
+expression contained a character which is not allowed." (seen live on a
+11.0.7 lab server: 16 of 17 test queries failed this way through besapi;
+through the library 16 answered and the 17th, `"100%"`, got its real
+%-sequence error). (Note that a literal `%` in
 a relevance *string constant* must be written `%25` in relevance syntax itself
 - an unescaped `%` produces the server-side error "A string constant had an
 improper %-sequence", which is a relevance authoring error, not an encoding
