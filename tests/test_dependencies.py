@@ -1,7 +1,8 @@
 """The first-party relevance libraries are hard dependencies with bounds.
 
 Each one floors at the release this server was built against and stops
-before the next major, where a breaking change would be allowed.
+before the next major, where a breaking change would be allowed (for
+bigfix-remote-session-relevance that is 2, since 1.x keeps the 0.5 contract).
 """
 
 import tomllib
@@ -13,7 +14,9 @@ PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
 EXPECTED = {
     "bigfix-relevance-analyzer": ">=1.38.1,<2",
-    "bigfix-remote-session-relevance": ">=0.5.1,<1",
+    # 1.x is announced as contract-compatible with 0.5, so the cap is the
+    # next major after it rather than the next one after 0.x
+    "bigfix-remote-session-relevance": ">=0.5.1,<2",
     "bigfix-remote-client-relevance": ">=1.5.4,<2",
 }
 

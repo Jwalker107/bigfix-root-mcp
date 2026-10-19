@@ -295,7 +295,7 @@ requires-dist = [
     { name = "bigfix-relevance-analyzer", specifier = ">=1.38.1,<2" },
     { name = "bigfix-remote-client-relevance", specifier = ">=1.5.4,<2" },
     { name = "bigfix-remote-client-relevance", marker = "extra == 'qna'", specifier = ">=1.5.4,<2" },
-    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.1,<1" },
+    { name = "bigfix-remote-session-relevance", specifier = ">=0.5.1,<2" },
     { name = "fastmcp", specifier = "==4.0.3" },
     { name = "lxml" },
     { name = "pydantic" },

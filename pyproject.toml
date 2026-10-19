@@ -31,8 +31,9 @@ dependencies = [
     "bigfix-remote-client-relevance>=1.5.4,<2",
     # session relevance evaluation (sessionrelevance.py); besapi remains the
     # client for every other REST call. 0.5.1: an unclosed sync client no
-    # longer hangs interpreter exit, which the server relies on
-    "bigfix-remote-session-relevance>=0.5.1,<1",
+    # longer hangs interpreter exit, which the server relies on. Capped at <2,
+    # not <1: 1.x is announced as keeping the 0.5 contract.
+    "bigfix-remote-session-relevance>=0.5.1,<2",
     "fastmcp==4.0.3",
     # imported directly by src/ (besxml.py, errors.py, server.py). They do
     # arrive transitively via besapi/fastmcp today, but a package should
