@@ -1,8 +1,8 @@
-"""Local/remote qna evaluation via bigfix_remote_client_relevance (optional).
+"""Local/remote qna evaluation via bigfix_remote_client_relevance.
 
-The package is an optional extra with heavy dependencies (asyncssh, docker),
-so its import is lazy and centralized in _qna(): the base install never pays
-for it, and tests fake it at the sys.modules seam.
+The package has heavy dependencies (asyncssh, docker), so its import is lazy
+and centralized in _qna(): a server that never evaluates client relevance
+never pays for it, and tests fake it at the sys.modules seam.
 
 Target policy - the security boundary alongside the registration gate in
 server.py: only names from the admin-configured inventory file plus
@@ -32,7 +32,7 @@ _PACKAGE = "bigfix_remote_client_relevance"
 
 
 def package_available() -> bool:
-    """Whether the optional package can be imported (without importing it)."""
+    """Whether the package can be imported (without importing it)."""
     if _PACKAGE in sys.modules:
         return True
     return importlib.util.find_spec(_PACKAGE) is not None
@@ -46,8 +46,8 @@ def inventory_path() -> str:
 def containers_enabled() -> bool:
     """Whether caller-named container images are allowed as targets.
 
-    Default on: installing the [qna] extra is the opt-in act, and containers
-    are ephemeral and run on the operator's own container engine. Set
+    Default on: containers are ephemeral and run on the operator's own
+    container engine, and without docker/podman a run fails cleanly. Set
     BIGFIX_QNA_CONTAINERS=0 to restrict targets to the inventory file only.
     """
     return os.environ.get("BIGFIX_QNA_CONTAINERS", "1").strip().lower() not in (
@@ -63,7 +63,7 @@ def qna_enabled() -> bool:
 
 
 def _qna():
-    """The single import seam for the optional package (monkeypatched in tests)."""
+    """The single import seam for the package (monkeypatched in tests)."""
     import bigfix_remote_client_relevance as pkg  # noqa: PLC0415 - lazy on purpose
 
     return pkg

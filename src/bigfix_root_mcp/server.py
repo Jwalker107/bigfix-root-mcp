@@ -34,6 +34,7 @@ from bigfix_root_mcp import (
     prompts,
     qna,
     response,
+    sessionrelevance,
     writes,
 )
 from bigfix_root_mcp.errors import (
@@ -51,9 +52,9 @@ MIN_POLL_INTERVAL_SECONDS = 2
 # read once at import: the write tools below are registered only if this is on
 WRITES_ENABLED = connection.writes_enabled()
 
-# read once at import, like writes: the qna tools exist only when the optional
-# bigfix-remote-client-relevance extra is installed and a target source is
-# allowed (see qna.qna_enabled)
+# read once at import, like writes: the qna tools exist only when
+# bigfix-remote-client-relevance is importable and a target source is allowed
+# (see qna.qna_enabled)
 QNA_ENABLED = qna.qna_enabled()
 
 LIMIT_FIELD = Field(
@@ -263,8 +264,9 @@ def session_relevance_query(
     total_available and truncated. Note the server still evaluates the whole
     query, so limit bounds the response, not the work.
 
-    Returns the JSON envelope: {"result": [...], "evaltime_ms": ...} plus
-    bounding metadata.
+    Returns the server's JSON envelope: {"result": [...], "plural": ...,
+    "type": ..., "evaltime_ms": ...} (plus "count" when the server sends
+    it) and bounding metadata.
 
     Results are evaluated within the configured operator's scope. Unless
     whoami reports is_main_operator, counts and lists are a lower bound on
@@ -274,8 +276,7 @@ def session_relevance_query(
     # advisory only: even a query the analyzer rejects is still sent - the
     # server is authoritative and the analyzer's tables are a snapshot
     advisory = analysis.preflight(relevance, dialect="session")
-    conn = connection.get_connection()
-    envelope = conn.session_relevance_json(relevance)
+    envelope = sessionrelevance.evaluate(relevance)
     try:
         payload = check_relevance_envelope(envelope)
     except ToolError as err:
@@ -616,9 +617,8 @@ def find_computers(
     Returns (name, id, last report time) rows. The search term cannot contain
     a double quote - BigFix relevance string literals have no escape for one.
     """
-    conn = connection.get_connection()
     relevance = content.build_computer_search_relevance(name_contains)
-    envelope = conn.session_relevance_json(relevance)
+    envelope = sessionrelevance.evaluate(relevance)
     return _bound_rows(check_relevance_envelope(envelope), "result", limit, offset)
 
 
@@ -708,10 +708,10 @@ def find_content(
 
     The search term cannot contain a double quote.
     """
-    conn = connection.get_connection()
     relevance = content.build_content_search_relevance(kind, name_contains)
-    envelope = check_relevance_envelope(conn.session_relevance_json(relevance))
+    envelope = check_relevance_envelope(sessionrelevance.evaluate(relevance))
     bounded = _bound_rows(envelope, "result", limit, offset)
+    conn = connection.get_connection()
     # resolve site paths only for the rows actually being returned
     bounded["result"] = content.annotate_content_rows(
         bounded["result"], content.build_site_path_map(conn)
@@ -901,9 +901,9 @@ def _audit(tool: str, target: str, dry_run: bool, outcome: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# qna fast evaluation (optional). Registration is the gate, as with writes:
-# with the extra uninstalled or every target source disabled, these tools do
-# not exist as far as any client can tell.
+# qna fast evaluation. Registration is the gate, as with writes: with every
+# target source disabled (or the package missing), these tools do not exist
+# as far as any client can tell.
 # --------------------------------------------------------------------------
 
 if QNA_ENABLED:

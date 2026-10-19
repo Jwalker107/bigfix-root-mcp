@@ -25,7 +25,13 @@ dependencies = [
     "besapi>=4.1.5",
     # static relevance analysis (advisory pre-flight, analyze_relevance tool);
     # pure stdlib, stdout-silent, safe inside a stdio server
-    "bigfix-relevance-analyzer>=1.8.3,<2",
+    "bigfix-relevance-analyzer>=1.38.1,<2",
+    # fast client relevance evaluation with the qna binary on containers or
+    # inventoried hosts (qna.py, evaluate_client_relevance_qna)
+    "bigfix-remote-client-relevance>=1.5.4,<2",
+    # session relevance evaluation (sessionrelevance.py); besapi remains the
+    # client for every other REST call
+    "bigfix-remote-session-relevance>=0.5.0,<1",
     "fastmcp==4.0.3",
     # imported directly by src/ (besxml.py, errors.py, server.py). They do
     # arrive transitively via besapi/fastmcp today, but a package should
@@ -36,11 +42,10 @@ dependencies = [
     "requests",
 ]
 
-# qna: fast client-relevance evaluation on containers/inventoried hosts via
-# the qna binary. Heavy deps (docker, asyncssh), so opt-in; the qna tools
-# register only when this is installed - see qna.py and the README.
+# qna: kept only so existing `bigfix-root-mcp[qna]` installs keep resolving;
+# bigfix-remote-client-relevance is now a base dependency.
 [project.optional-dependencies]
-qna = ["bigfix-remote-client-relevance>=1.1.2,<2"]
+qna = ["bigfix-remote-client-relevance>=1.5.4,<2"]
 
 [project.urls]
 Homepage = "https://github.com/jgstew/bigfix-root-mcp"
@@ -75,7 +80,7 @@ exclude-newer = "7 days"
 # First-party packages (same author as this project) are exempt from the
 # cooldown: it guards against compromised *third-party* releases, and these
 # iterate faster than 7 days.
-exclude-newer-package = { bigfix-relevance-analyzer = "1 hour", bigfix-remote-client-relevance = "1 hour" }
+exclude-newer-package = { bigfix-relevance-analyzer = "1 hour", bigfix-remote-client-relevance = "1 hour", bigfix-remote-session-relevance = "1 hour" }
 # fastmcp 4.0.0b1 is a meta-package over fastmcp-slim; uv only allows
 # prereleases for explicitly named packages, so the transitive dep has to be
 # named here to be resolvable at all.

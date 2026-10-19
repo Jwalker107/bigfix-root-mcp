@@ -4,6 +4,7 @@ import lxml.objectify
 import pytest
 
 import bigfix_root_mcp.connection as connection_module
+from bigfix_root_mcp import sessionrelevance
 
 
 class FakeResponse:
@@ -76,15 +77,6 @@ class FakeBESConnection:
             raise AssertionError(f"unexpected POST {path}")
         return self.post_responses.pop(0)
 
-    def session_relevance_json(self, relevance, **kwargs):
-        self.calls.append(("session_relevance_json", relevance, kwargs))
-        if not self.relevance_responses:
-            raise AssertionError("unexpected session_relevance_json call")
-        response = self.relevance_responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
-
     def get_user(self, user_name):
         self.calls.append(("get_user", user_name))
         if not self.get_responses:
@@ -104,5 +96,19 @@ def fake_conn(monkeypatch):
     """Install a FakeBESConnection as the cached module-level connection."""
     conn = FakeBESConnection()
     monkeypatch.setattr(connection_module, "_conn", conn)
+
+    # session relevance goes through sessionrelevance, not besapi (which has
+    # no session_relevance_json here, so a stray besapi query fails loudly);
+    # relevance_responses holds /api/query envelopes or exceptions to raise
+    def evaluate(session_relevance):
+        conn.calls.append(("session_relevance", session_relevance))
+        if not conn.relevance_responses:
+            raise AssertionError("unexpected session relevance query")
+        response = conn.relevance_responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(sessionrelevance, "evaluate", evaluate)
     yield conn
     connection_module.reset_connection()

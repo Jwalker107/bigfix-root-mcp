@@ -142,6 +142,14 @@ def get_connection() -> besapi.besapi.BESConnection:
 
 
 def reset_connection() -> None:
-    """Drop the cached connection (tests; recovery after auth errors)."""
+    """Drop the cached connections (tests; recovery after auth errors).
+
+    Also resets session relevance's client, so the two are always built from
+    the same config.
+    """
+    # deferred: sessionrelevance imports this module
+    from bigfix_root_mcp import sessionrelevance  # noqa: PLC0415
+
     global _conn  # noqa: PLW0603
     _conn = None
+    sessionrelevance.reset()

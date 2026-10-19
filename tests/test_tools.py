@@ -26,7 +26,7 @@ class TestSessionRelevance:
         assert result.data["result"] == ["computer1", "computer2"]
         assert result.data["evaltime_ms"] == 12
         assert fake_conn.calls[0][:2] == (
-            "session_relevance_json",
+            "session_relevance",
             "names of bes computers",
         )
 
@@ -43,6 +43,82 @@ class TestSessionRelevance:
         )
         with pytest.raises(ToolError, match="permission"):
             await call("session_relevance_query", {"relevance": "names of bes users"})
+
+
+class TestSessionRelevanceContract:
+    """Regression pins for the tool-facing session relevance contract.
+
+    Written before session relevance moved from besapi to
+    bigfix-remote-session-relevance: whichever library evaluates the query,
+    the payload shape, the envelope metadata and the error hints a model
+    retries from must stay the same.
+    """
+
+    async def test_tuple_rows_and_envelope_metadata_survive(self, fake_conn):
+        fake_conn.relevance_responses.append(
+            {
+                "result": [["host1", 1], ["host2", 2]],
+                "plural": True,
+                "type": "( string, integer )",
+                "evaltime_ms": 7,
+            }
+        )
+        result = await call(
+            "session_relevance_query", {"relevance": "(name of it, id of it) of bes computers"}
+        )
+        assert result.data["result"] == [["host1", 1], ["host2", 2]]
+        assert result.data["plural"] is True
+        assert result.data["type"] == "( string, integer )"
+        assert result.data["evaltime_ms"] == 7
+        assert result.data["total_available"] == 2
+
+    async def test_client_only_inspector_hint(self, fake_conn):
+        fake_conn.relevance_responses.append({"error": 'The operator "file" is not defined.'})
+        with pytest.raises(ToolError, match=r"\*client\* relevance inspector"):
+            await call("session_relevance_query", {"relevance": 'exists file "c:\\x"'})
+
+    async def test_singular_expression_hint(self, fake_conn):
+        fake_conn.relevance_responses.append(
+            {"error": "Singular expression refers to nonexistent object."}
+        )
+        with pytest.raises(ToolError, match="Use the plural form"):
+            await call("session_relevance_query", {"relevance": "name of bes computer 1"})
+
+    async def test_find_computers_relevance_error(self, fake_conn):
+        fake_conn.relevance_responses.append({"error": "This expression could not be parsed."})
+        with pytest.raises(ToolError, match="Session relevance error"):
+            await call("find_computers", {"name_contains": "host"})
+
+
+class TestSessionRelevanceUnreachable:
+    """Black-box: a real connection attempt to a closed port, no fakes.
+
+    Port 1 on loopback refuses immediately, so these stay fast and offline.
+    """
+
+    @pytest.fixture(autouse=True)
+    def unreachable_server(self, monkeypatch):
+        from bigfix_root_mcp import connection
+
+        monkeypatch.setenv("BES_ROOT_SERVER", "https://127.0.0.1:1")
+        monkeypatch.setenv("BES_USER_NAME", "nobody")
+        monkeypatch.setenv("BES_PASSWORD", "<PASSWORD>")
+        monkeypatch.setenv("BES_SSL_VERIFY", "false")
+        connection.reset_connection()
+        yield
+        connection.reset_connection()
+
+    @pytest.mark.parametrize(
+        ("tool", "arguments"),
+        [
+            ("session_relevance_query", {"relevance": "number of bes computers"}),
+            ("find_computers", {"name_contains": "host"}),
+            ("find_content", {"kind": "fixlet", "name_contains": "patch"}),
+        ],
+    )
+    async def test_reports_server_unreachable(self, tool, arguments):
+        with pytest.raises(ToolError, match=f"{tool}: cannot reach the BigFix root server"):
+            await call(tool, arguments)
 
 
 class TestAnalysisTools:
@@ -78,7 +154,7 @@ class TestAdvisoryPreflight:
         fake_conn.relevance_responses.append({"result": [], "evaltime_ms": 1})
         result = await call("session_relevance_query", {"relevance": "number of of bes computers"})
         # non-blocking: the server was still asked, findings ride alongside
-        assert fake_conn.calls[0][0] == "session_relevance_json"
+        assert fake_conn.calls[0][0] == "session_relevance"
         codes = [f["code"] for f in result.data["analysis"]["findings"]]
         assert "parse-error" in codes
 
@@ -481,9 +557,10 @@ class TestToolSurface:
             "list_roles",
             "validate_bes_xml",
         }
-        # present only in a venv with the [qna] extra installed (gate on)
-        if server.QNA_ENABLED:
-            expected |= {"evaluate_client_relevance_qna", "list_qna_targets"}
+        # bigfix-remote-client-relevance is a base dependency and container
+        # targets default on, so the qna tools are part of the default surface
+        # (test_qna.py covers the gate turning them off)
+        expected |= {"evaluate_client_relevance_qna", "list_qna_targets"}
         assert tools == expected
 
 

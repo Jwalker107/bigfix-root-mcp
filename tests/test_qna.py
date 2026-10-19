@@ -1,9 +1,10 @@
-"""Gated qna evaluation surface (the optional bigfix-remote-client-relevance extra).
+"""Gated qna evaluation surface (bigfix-remote-client-relevance).
 
 The registration gate is the security boundary (same design as writes), so the
 tests that matter most are which tools exist and which targets are refused.
 The package itself is faked at the sys.modules seam: these tests need no
-docker, no ssh, and not even the extra installed.
+docker and no ssh. TestRealPackageContract checks the fake against the real
+installed package.
 """
 
 import importlib
@@ -155,9 +156,8 @@ class TestResolveTargets:
 def ungated(monkeypatch):
     """A server module reloaded with every qna target source disabled.
 
-    The gate must be forced off rather than assumed off: a dev venv with the
-    [qna] extra installed has the package importable, and these tests must
-    hold either way.
+    The gate must be forced off rather than assumed off: the package is a
+    base dependency, so it is always importable.
     """
     monkeypatch.setenv("BIGFIX_QNA_CONTAINERS", "0")
     monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
@@ -288,3 +288,47 @@ class TestEvaluateClientRelevanceQna:
         assert result.data["inventory"] == [
             {"name": "mac-test", "kind": "ssh", "label": "mac-test"}
         ]
+
+
+class TestRealPackageContract:
+    """bigfix-remote-client-relevance is a base dependency now, so the fake
+    above must keep matching the real API this module calls."""
+
+    @pytest.fixture(autouse=True)
+    def real_pkg(self, monkeypatch):
+        monkeypatch.delitem(sys.modules, PKG, raising=False)
+        return importlib.import_module(PKG)
+
+    def test_installed_by_default(self):
+        assert qna.package_available() is True
+
+    def test_tools_registered_with_default_environment(self, monkeypatch):
+        monkeypatch.delenv("BIGFIX_QNA_INVENTORY", raising=False)
+        monkeypatch.delenv("BIGFIX_QNA_CONTAINERS", raising=False)
+        assert qna.qna_enabled() is True
+
+    def test_calls_match_the_real_signatures(self, real_pkg):
+        import inspect
+
+        target = real_pkg.Target(kind="container", name="ubuntu:22.04", image="ubuntu:22.04")
+        assert target.label  # list_inventory_targets and the audit log read it
+        # exactly as qna.py / server.py call them
+        inspect.signature(real_pkg.load_inventory).bind("/etc/qna-hosts.toml")
+        inspect.signature(real_pkg.count_work).bind([target], None)
+        inspect.signature(real_pkg.evaluate_client_relevance_stream).bind(
+            "computer name",
+            [target],
+            qna_version=None,
+            max_parallel=1,
+            timeout_s=30,
+        )
+        inspect.signature(real_pkg.result_to_dict).bind(object(), max_raw_output=4000)
+
+    def test_container_targets_build_with_the_real_target(self):
+        targets = qna.resolve_targets(None, ["ubuntu:22.04"])
+        assert targets[0].kind == "container"
+        assert targets[0].image == "ubuntu:22.04"
+
+    def test_result_payload_has_the_keys_the_server_reads(self, real_pkg):
+        # server.py reads error_kind from each shaped result for progress
+        assert "error_kind" in real_pkg.ResultPayload.__annotations__
