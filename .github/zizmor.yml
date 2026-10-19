@@ -1,0 +1,6 @@
+rules:
+  # self-repository wants local reusable workflows written as `uses: $/...`
+  # instead of `uses: ./...`, but actionlint rejects the `$/` form, so keep
+  # `./` and silence this rule.
+  self-repository:
+    disable: true
