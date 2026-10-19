@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -196,7 +196,7 @@ wheels = [
 
 [[package]]
 name = "besapi"
-version = "4.4.2"
+version = "4.4.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cmd2" },
@@ -206,9 +206,9 @@ dependencies = [
     { name = "setuptools" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e1/3d/d74db9cd035d0b501b09b6c8bd72dd16cabdb3e09ffb3b556a1ec362981d/besapi-4.4.2.tar.gz", hash = "sha256:88c0e6ec4adf3af165f267eccb1cd8f3c915f8745f8f291e81f7a3d5e81cb3fb", size = 158951, upload-time = "2026-10-03T18:51:24.02Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/8b/484e98c1f4a3d82244cca770e9a483f3321aed9867fb3e8b26ba6e44e950/besapi-4.4.3.tar.gz", hash = "sha256:f066d7fd5963c27514758f9ef95e63d1bd2682c1252a23c2aa55642c89b95f8c", size = 166183, upload-time = "2026-10-05T02:55:02.415Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/9e/6bf170f6d4f2bdeaafe6016519e8d59b54b480711964c9e7241eaa657bbe/besapi-4.4.2-py3-none-any.whl", hash = "sha256:c9fc1997803f18273d5d2ba026ac5627bca331a4d2a73e31cb4aacf4398db6e2", size = 51262, upload-time = "2026-10-03T18:51:22.657Z" },
+    { url = "https://files.pythonhosted.org/packages/29/b3/e10ad9863ffb15aed136dbef9f9d74814050e1f29ded7b87a05088d78645/besapi-4.4.3-py3-none-any.whl", hash = "sha256:243cc5e55b6d339f83d242fb6ba3be1ac133be8d3e579298c8ef9b1bb2afdcfc", size = 51934, upload-time = "2026-10-05T02:55:01.334Z" },
 ]
 
 [[package]]
