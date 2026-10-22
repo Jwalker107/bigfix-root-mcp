@@ -158,6 +158,7 @@ besapi.conf
 corpus/raw/
 corpus/md/
 corpus/index/
+corpus/eval/
 
 # Environments
 .env

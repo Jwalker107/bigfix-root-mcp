@@ -156,7 +156,8 @@ Modules in `tools/ingest/`:
 | `chunking.py` | markdown plus the site's template tags -> chunks and examples (pure functions) |
 | `convert.py` | HTML -> markdown (stdlib); PDF -> markdown via `pypdf` if installed |
 | `scan.py` | secret/PII heuristics; allowlist in `corpus/SCAN_ALLOW.csv` |
-| `index.py` | SQLite + FTS5 writer, schema version 1 (documented in the module) |
+| `index.py` | SQLite + FTS5 writer, schema version 2 (documented in the module; version 1 had no analyzer verdict) |
+| `verdict.py` | the offline analyzer's verdict on one query, stored with each example |
 | `build.py` | `python -m tools.ingest.build`: orchestrates all of the above |
 
 Build behaviour worth knowing:
@@ -312,10 +313,14 @@ What it found:
   (`links (name of it & ... ")")) of bes computers`) and a stray `".` ending. An
   example that does not parse is a bad model of syntax, so it should not be
   presented as equal to a documented, answered one.
-- **The analyzer can label most of the `unknown`-dialect examples.** Of the 869
-  `unknown`-dialect examples that parse, 866 are classified definitively with no
-  disagreement between its two signals: 744 client, 125 session. That would make
-  the dialect filter useful for the inspector reference.
+- **The analyzer can label about two thirds of the `unknown`-dialect examples.**
+  **Correction:** the first pass reported "866 of 869 classified definitively
+  (744 client, 125 session)". That counted a resolution of `both` (the query is
+  valid in either dialect, e.g. `bit 0 of bit set "10"`) as definite, which it is
+  not. The measured figure, after the labelling rule was made strict, is 569 of
+  869: 443 client and 126 session. 300 resolve to `both` and stay unknown, and 7
+  do not parse. Even so, that makes the dialect filter useful for the
+  inspector reference's examples.
 - **Analyzer snapshot gaps, not doc errors.** 49 examples (34 distinct names)
   use inspectors the analyzer does not know, mostly BigFix 11 additions: `idp
   user` (14 examples), `idp groups` (8), `ips image`, `repository site flag`,
@@ -329,23 +334,54 @@ What it found:
   (`(exists relay service) OR ()`) is a deliberate half-finished step; the
   `json-value.md` examples use `<Example>` placeholders. None of these are
   extraction errors; the text is kept verbatim.
-- **One extraction limit:** a bare fence is read as one query, but
-  `guide/basics/introspectors.md` has two blank-line-separated queries in one
-  fence. It is the only such case.
+- **One extraction limit:** a bare fence was read as one query, but
+  `guide/basics/introspectors.md` has **8** blank-line-separated queries in a
+  single fence (the first report said 2; the output had been cut short). It is
+  the only such fence. Fixed below.
 - Lint findings are mostly style: `non-unique-risk` (79), `plural-preferred`
   (52), `unknown-inspector` (50), `type-error` (9), `error-token` (5).
 
-Changes this suggests, none made yet:
-1. Store the analyzer verdict with each example in the index (parses or not,
-   unknown inspectors) and show it in `search_relevance_docs`, so an example
-   that does not parse is flagged instead of taught.
-2. Use the analyzer's classification to set the dialect of `unknown` examples.
-3. Define the golden set from `qna` and `fence-qa` examples that parse, have a
-   documented answer and are not `incomplete`; check their answers live next.
-4. Split a bare fence at blank lines (one example today).
+#### Phase 5a, step 2: the four changes (done 2026-10-21)
 
-Still to do in 5a: live answer checks through the configured qna targets, and
-retrieval scoring (does the right chunk or example come back in the top 5).
+1. **The analyzer verdict is stored and shown.** Index schema is now **version 2**
+   (`tools/ingest/index.py`, `src/bigfix_root_mcp/knowledge.py`). Each example
+   carries `parses` (1, 0, or NULL when not analysed), `parse_error`,
+   `unknown_inspectors` and `dialect_source`; `meta` records `analyzer_version`.
+   `search_relevance_docs` returns them: `parses: false` (with `parse_error`)
+   flags an example that does not parse, and its note says what that means (for
+   an example with documented `errors` the failure can be the point). The
+   verdict only labels; results are not re-ranked by it. A server that reads
+   version 1 reports `available: false` for a version 2 index and says to
+   rebuild, and the reverse; restart the MCP server after an upgrade.
+   The shared code is `tools/ingest/verdict.py`, used by the build and by
+   `tools/eval/analyze_examples.py`.
+2. **Dialects are inferred only when the analyzer is definite.** An example
+   whose source states no dialect is labelled `session` or `client` when the
+   analyzer's text classifier and inspector table name exactly one of them. A
+   resolution of `both`, a conflict, or a query that does not parse leaves it
+   `unknown`, and a dialect the source states is never overridden. The label is
+   marked `dialect_source: analyzer`. The eval tool ignores such labels when it
+   pins dialects, so its mismatch check stays independent.
+3. **The golden set is defined and generated, not committed.**
+   `python -m tools.eval.golden` writes `corpus/eval/golden.jsonl` (+
+   `golden.meta.json`, untracked) from the index: documented `qna` / `fence-qa`
+   examples that parse, document an answer, document no error and are not
+   `incomplete`. The examples are documentation text, so only the code and
+   criteria are committed. First result: **1,031 of 1,204 examples**; excluded:
+   103 bare fences, 12 that do not parse, 2 incomplete, 36 documenting an error,
+   20 with no documented answer. 44 golden examples use an inspector the
+   analyzer lacks (kept and flagged).
+4. **A bare `relevance` fence is split at blank lines**, one example per
+   statement. It changed one fence (`introspectors.md`, 1 example to 8).
+
+Result of the rebuilt index (docs commit `89435d3`, analyzer 1.38.1): 1,204
+examples; 1,170 parse and 34 do not (22 bare fences, 12 `qna`); 569 examples
+labelled by the analyzer (443 client, 126 session); 49 mention an inspector the
+analyzer lacks.
+
+Still to do in 5a: live answer checks of the golden set through the configured
+qna targets, and retrieval scoring (does the right chunk or example come back in
+the top 5).
 
 ### Phase 6: Docs and CI
 - README: the new tool, environment variables, how to build the index, the
