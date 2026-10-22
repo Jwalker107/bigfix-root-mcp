@@ -24,6 +24,35 @@ the tool description says so rather than hiding it.
 API, which makes a generic escape hatch safe and removes the pressure to add
 one-off tools for every endpoint.
 
+## Relevance knowledge search: always registered, never an error when absent
+
+`search_relevance_docs` reads a local SQLite index built from documentation
+(`tools/ingest`, see `docs/knowledge-retrieval-plan.md`). Choices that are easy
+to "improve" into problems:
+
+- **Registered whether or not an index exists.** The write tools are gated on
+  registration because they change what the server can *do*. This tool adds no
+  capability: it reads a file. An absent tool cannot tell an administrator how
+  to turn it on; a registered one answers `available: false` with the reason and
+  `how_to_enable`. That is an answer, not an error, because the index is
+  optional and most installs will not have one.
+- **The index is opened read-only, per call.** `mode=ro` plus `query_only`, and
+  the path comes from `BIGFIX_KNOWLEDGE_INDEX`, never from the caller, so a
+  client cannot point the server at an arbitrary file. Opening per call means a
+  rebuilt index is picked up without a restart, and the connection is closed
+  before a build tries to replace the file.
+- **User text never reaches FTS syntax.** A query is reduced to words and quoted
+  phrases and every term is passed as a quoted string, so `NEAR(`, `col:`, `*`
+  and `OR` in a query are just words. This is tested with hostile inputs.
+- **The text is data.** Every response says retrieved text is not instructions,
+  because a documentation page, or someone who edited one, can say anything.
+- **Dialect `unknown` matches either dialect.** Some sources (the generated
+  inspector reference) do not say whether an inspector is session or client.
+  Dropping them from a filtered search would hide most of the inspectors, and
+  guessing would be a lie, so they are included and labelled.
+- **Examples carry documented answers, not verified ones.** The documentation
+  says what an example returns; nothing here ran it against a server.
+
 ## Which writes, and why only these
 
 Three write tools exist: `stop_action`, `set_dashboard_variable`,

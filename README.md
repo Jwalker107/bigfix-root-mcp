@@ -22,6 +22,7 @@ The capabilities of this MCP server are intentionally limited, where as the offi
 | `session_relevance_query` | Evaluate session relevance on the root server; returns the JSON envelope (`result`, `count`, `plural`, `type`, `evaltime_ms`). |
 | `analyze_relevance` | Statically analyze a relevance expression offline - parse, types, dialect, unknown inspectors with suggestions, complexity. Never evaluates it. |
 | `search_inspectors` | Fuzzy-search the offline inspector reference by name or phrase. |
+| `search_relevance_docs` | Search a local, offline index of relevance documentation and worked examples (needs `BIGFIX_KNOWLEDGE_INDEX`; answers `available: false` with how to enable it when unset). Never contacts BigFix. |
 | `client_query_submit` | Submit a client fast query, return its `query_id` immediately. |
 | `client_query_results` | Fetch current (cumulative) results for a query ID; safe to call repeatedly. |
 | `client_query` | Submit + poll in one call with progress notifications; stops on expected count reached, results stable, or timeout. |
@@ -140,6 +141,7 @@ Environment variables win over config files:
 | qna inventory | `BIGFIX_QNA_INVENTORY`: path to a remote_clients.toml, or `0` for none (see [qna evaluation](#qna-evaluation)) | `~/.bigfix/remote_clients.toml`, then the all-users config dir |
 | qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
+| Knowledge index | `BIGFIX_KNOWLEDGE_INDEX`: path to the `relevance.sqlite` built by `python -m tools.ingest.build` (see [docs/knowledge-retrieval-plan.md](docs/knowledge-retrieval-plan.md)). Read-only; read on every call, so a rebuilt index is picked up without a restart | unset (`search_relevance_docs` reports it is unavailable) |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
 Config files are searched in besapi's order: `/etc/besapi.conf`,

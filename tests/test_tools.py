@@ -535,6 +535,8 @@ class TestToolSurface:
             # offline static analysis - no server contact at all
             "analyze_relevance",
             "search_inspectors",
+            # offline search of the local relevance knowledge index (read-only)
+            "search_relevance_docs",
             "client_query_submit",
             "client_query_results",
             "client_query",
