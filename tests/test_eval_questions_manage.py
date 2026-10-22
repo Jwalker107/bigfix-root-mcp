@@ -13,7 +13,7 @@ def question(identifier="q1", **overrides):
         "question": "Write relevance that is true on Windows computers.",
         "kind": "applicability",
         "dialect": "client",
-        "origin": "repository_sites",
+        "origin": "example_site",
         "status": "draft",
         "difficulty": "easy",
         "candidate_id": "c1",

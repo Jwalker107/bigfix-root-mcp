@@ -20,7 +20,7 @@ is reported.
 | 3. Retrieval tool | Done (`search_relevance_docs`, read-only, tested against fixture and real index) |
 | 4. Workflow prompt and curated resources | Done (`write_relevance`, conventions file, two analyzer-checked resources) |
 | 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22). Phase 5b has started: 25 questions from the team's own BES content are approved (more wanted) |
-| 6. Reference fixlets | Planned (written 2026-10-22); not started. Needs the decisions listed in its section before 6e |
+| 6. Reference fixlets | Done (2026-10-22): 6a to 6f. `search_reference_fixlets` over a separate, untracked, company-content index; how to build it: [reference-fixlets.md](reference-fixlets.md). Private repositories are untested |
 | 7. Docs and CI | Not started |
 
 ## Decisions
@@ -470,7 +470,8 @@ so the comparison is best written against a first run.
 Goal: a set of questions people would really ask, each with a reference answer,
 so retrieval can be judged on relevance (what Phase 5a's mechanics checks cannot).
 
-Source: the team's own BES content (`c:\github\repository_sites`): 47 `.bes`
+Source: the team's own BES content (a local working tree, listed in the untracked
+source list): 47 `.bes`
 files, 5 byte-identical copies skipped, 37 distinct Fixlet/Task/Analysis items,
 **183 candidates** (37 applicability, 146 analysis properties). All 183 parse
 cleanly with the analyzer, 3 mention an inspector it lacks, 0 held a secret.
@@ -528,7 +529,7 @@ Observations so far:
   are only as informative as their titles.
 - No session-relevance questions exist yet; this content has none.
 
-### Phase 6: Reference fixlets (planned, written 2026-10-22)
+### Phase 6: Reference fixlets (done 2026-10-22)
 
 Goal: learn from a tree of existing `.bes` files, so the server can show how this
 team has already solved a problem and which habits recur. Apply the same shape
@@ -688,7 +689,7 @@ How to build the index from each kind of source, step by step:
 | 6c (done 2026-10-22) | Scan for secrets, build the index with the analyzer verdict | `python -m tools.ingest.fixletbuild` (`--all`, `--source`, `--dir`, `--git`, `--dry-run`) writes `corpus/index/fixlets.sqlite` (schema v1, `tools/ingest/fixletindex.py`). A planted secret is left out and reported by file, field and rule, never by value. On the real tree: 183 clauses (37 applicability, 146 property), all parse, 3 mention an inspector the analyzer lacks, 18 carry an action-script excerpt, nothing blocked. Platform and conventions columns arrive with 6d, so this schema is provisional until then |
 | 6d (done 2026-10-22) | Convention counting with support thresholds | `tools/ingest/fixletconventions.py`; index schema v2 adds `source_group`, `platform` and a `conventions` table. Counted per group, role and platform (plus `all`), as line, `and`-part (conjunct), opening line and shape, with files, total, share and example ids. Support: 5 items and, per role, 10 percent (applicability) or 1 percent (property, which varies far more). The real index has 107 conventions. Team applicability: the proxy-agent guard is in 344 of 509 sets (67.6 percent), alone or joined to a platform test with `and` |
 | 6e (done 2026-10-22) | Tool, prompt step, resource note, README | `search_reference_fixlets` (`src/bigfix_root_mcp/reference.py`) reads `BIGFIX_FIXLET_INDEX`; results carry group, source and read time, collapse copies within a group, and come with that group's counted conventions. `BIGFIX_FIXLET_HOLDOUT` removes items for evaluations and fails closed when malformed. `write_relevance` step 2 uses it when available. Approval to return results to the model was given by the user (2026-10-22) |
-| 6f | Tests and docs | Fixtures are synthetic; nothing confidential is committed |
+| 6f (done 2026-10-22) | Tests and docs | Full suite, ruff, mypy and pre-commit pass; fixtures are synthetic; the wheel holds no index, checkout, source list or company content; the only internal path in tracked files was generalized. Counts taken from the team's content stay in this plan as aggregates (no content): the user decides whether a public fork should carry them |
 
 #### First real build (2026-10-22)
 

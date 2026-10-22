@@ -263,7 +263,7 @@ class TestReadLog:
 
     def test_the_log_is_ascii(self, tmp_path):
         log = tmp_path / "reads.jsonl"
-        fixlets.append_read({"location": "caf\u00e9"}, log)
+        fixlets.append_read({"location": "na" + chr(0xEF) + "ve"}, log)
         assert log.read_bytes().isascii()
 
 
