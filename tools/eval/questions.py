@@ -26,7 +26,6 @@ relevance, its title and its description.
 """
 
 import argparse
-import hashlib
 import json
 import logging
 import sys
@@ -35,24 +34,18 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from tools.ingest import fetch, scan, verdict
-from tools.ingest.bes import Extraction, Item, Statement, extract
+from tools.ingest.bes import Extraction, Item, Statement, content_id, extract
 
 log = logging.getLogger("corpus.eval")
 
 CANDIDATES_NAME = "candidates.jsonl"
 
 
-def _candidate_id(*parts: str) -> str:
-    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
-
-
 def _record(item: Item, statements: list[Statement], role: str) -> dict:
     relevance = [s.relevance for s in statements]
     verdicts = [verdict.analyze_query(text, "client") for text in relevance]
     return {
-        "id": _candidate_id(
-            item.kind, item.title, role, *(s.name + s.relevance for s in statements)
-        ),
+        "id": content_id(item.kind, item.title, role, statements),
         "kind": role,
         "item_kind": item.kind,
         "title": item.title,

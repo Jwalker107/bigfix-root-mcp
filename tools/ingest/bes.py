@@ -17,7 +17,8 @@ Safety, because these files may be confidential and are never trusted:
     link cannot lead the walk outside the directory it was given;
   - one file that is not valid XML is recorded and skipped, never fatal.
 
-Action scripts are not read here. Only relevance, title and description are.
+Action scripts are read only when asked for (actions=True), because they are where
+credentials and internal hostnames most often sit; the question collector never asks.
 """
 
 import hashlib
@@ -31,6 +32,8 @@ from lxml import etree
 from tools.ingest import convert
 
 DESCRIPTION_CHARS = 600
+# how much of one action script is kept: enough to say what the item does
+ACTION_CHARS = 1500
 # directories that hold tooling or dependencies, never content worth reading
 SKIP_DIRS = frozenset({".git", "node_modules", "site-packages", "__pycache__", ".venv", "venv"})
 KINDS = ("Fixlet", "Task", "Analysis")
@@ -51,6 +54,7 @@ class Item:
     description: str
     path: str  # relative to the source directory, posix separators
     statements: list[Statement] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)  # action script text, only if asked for
 
 
 @dataclass
@@ -86,7 +90,26 @@ def _description(element: etree._Element | None) -> str:
     return re.sub(r"\s+", " ", raw).strip()[:DESCRIPTION_CHARS]
 
 
-def parse_bes(data: bytes, path: str) -> list[Item]:
+def content_id(kind: str, title: str, role: str, statements: list[Statement]) -> str:
+    """A short id from what an item says, not where it lives.
+
+    The same item in two places (or two checkouts) gets the same id, which is what lets
+    an evaluation hold out the item a question was written from.
+    """
+    parts = (kind, title, role, *(s.name + s.relevance for s in statements))
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+def _action_scripts(element: etree._Element) -> list[str]:
+    scripts = []
+    for script in element.iter("ActionScript"):
+        text = _text(script)
+        if text:
+            scripts.append(text[:ACTION_CHARS])
+    return scripts
+
+
+def parse_bes(data: bytes, path: str, *, actions: bool = False) -> list[Item]:
     """Read the items in one BES document. Raises etree.XMLSyntaxError if it is not XML."""
     root = etree.fromstring(data, _parser())
     items = []
@@ -111,6 +134,8 @@ def parse_bes(data: bytes, path: str) -> list[Item]:
                 for prop in element.findall("Property")
                 if _text(prop)
             ]
+        if actions and kind != "Analysis":
+            item.actions = _action_scripts(element)
         if item.statements:
             items.append(item)
     return items
@@ -139,7 +164,7 @@ def bes_files(root: Path) -> list[Path]:
     return [path for _, path in sorted(found, key=lambda pair: pair[0])]
 
 
-def extract(root: Path) -> Extraction:
+def extract(root: Path, *, actions: bool = False) -> Extraction:
     """Read every .bes file under root; identical files and identical items count once."""
     result = Extraction(items=[])
     seen_files: set[str] = set()
@@ -156,7 +181,7 @@ def extract(root: Path) -> Extraction:
             continue
         seen_files.add(digest)
         try:
-            items = parse_bes(data, relative)
+            items = parse_bes(data, relative, actions=actions)
         except etree.XMLSyntaxError:
             result.unparsable.append(relative)
             continue

@@ -10,6 +10,9 @@ Every read leaves a record saying what was read and when: the UTC time, the comm
 to an untracked log, so "when was this source last read, and was it the same
 content" can be answered later. A dry run changes nothing and writes no record.
 
+Action scripts are read as well (the index keeps a short excerpt after a secret scan);
+they are never printed in a report.
+
 Confidentiality: this is company content. Nothing here is written to the repository;
 the source list, the checkouts and the read log are all untracked. A source's own
 location is internal, so it stays in the untracked list as well.
@@ -197,7 +200,7 @@ def _read_directory(row: dict[str, str], when: str) -> Read:
         root = _inside(directory, row["subpath"])
     except ValueError as err:
         return Read(row["id"], error=str(err))
-    extraction = bes.extract(root)
+    extraction = bes.extract(root, actions=True)
     return Read(
         row["id"],
         record=_record(resolved, when, extraction, branch="", commit="", commit_date=""),
@@ -227,7 +230,7 @@ def _read_repository(
         root = _inside(checkout, row["subpath"])
     except ValueError as err:
         return Read(row["id"], error=str(err))
-    extraction = bes.extract(root)
+    extraction = bes.extract(root, actions=True)
     date = gitsource.commit_date(checkout, **kwargs)
     return Read(
         row["id"],
