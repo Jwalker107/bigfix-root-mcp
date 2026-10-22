@@ -1,8 +1,9 @@
 """Write the relevance knowledge index (SQLite with FTS5).
 
-Schema version 1:
+Schema version 2:
 
-  meta      key/value: schema_version, built_at (UTC), sqlite_version, counts.
+  meta      key/value: schema_version, built_at (UTC), sqlite_version, counts,
+            and analyzer_version when the examples were analysed.
   sources   one row per ingested source: where it came from and exactly which
             revision (a git commit, or the SHA-256 of the fetched file).
   chunks    heading-sized pieces of documentation. kind is 'explanation' or
@@ -10,14 +11,25 @@ Schema version 1:
   examples  relevance examples, each tied to the chunk it appears in. answers
             and errors are JSON arrays of strings. `incomplete` = 1 means the
             expected answers may be partial, so do not score them exactly.
+            The offline analyzer's verdict is stored with each example:
+              parses              1 / 0, or NULL when it was not analysed. 0 on
+                                  an example whose `errors` are documented can
+                                  be expected; otherwise the syntax is suspect.
+              parse_error         why it did not parse ('' when it did)
+              unknown_inspectors  JSON array of names the analyzer's snapshot
+                                  lacks (newer documentation, or a typo)
+            `dialect` is the example's own. dialect_source says where it came
+            from: 'source' (the documentation states it, or it inherits the
+            chunk's) or 'analyzer' (the source did not say, and the analyzer was
+            definite and consistent).
   chunks_fts, examples_fts
             external-content FTS5 tables (porter stemming over unicode61).
             chunks_fts indexes heading, section_path and text; examples_fts
             indexes the query and the context around it.
 
-dialect is one of session, client, both, unknown. `unknown` means the source
-does not say (not that it applies to neither); a reader filtering by dialect
-should treat it as matching both.
+dialect is one of session, client, both, unknown. `unknown` means nothing says
+(not that it applies to neither); a reader filtering by dialect should treat it
+as matching both.
 
 The file is built beside its destination and renamed into place, so a failed
 build never leaves a half-written index behind. Rows are inserted in the order
@@ -31,9 +43,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DIALECTS = ("session", "client", "both", "unknown")
+DIALECT_SOURCES = ("source", "analyzer")
 CHUNK_KINDS = ("explanation", "inspector")
 
 _SCHEMA = """
@@ -71,7 +84,11 @@ CREATE TABLE examples (
     errors TEXT NOT NULL,
     result_type TEXT NOT NULL,
     incomplete INTEGER NOT NULL CHECK (incomplete IN (0, 1)),
-    context TEXT NOT NULL
+    context TEXT NOT NULL,
+    dialect_source TEXT NOT NULL CHECK (dialect_source IN ('source', 'analyzer')),
+    parses INTEGER CHECK (parses IN (0, 1)),
+    parse_error TEXT NOT NULL,
+    unknown_inspectors TEXT NOT NULL
 );
 CREATE INDEX chunks_by_source ON chunks(source_id);
 CREATE INDEX examples_by_chunk ON examples(chunk_id);
@@ -119,12 +136,21 @@ class ExampleRow:
     result_type: str
     incomplete: bool
     context: str
+    # the example's own dialect; None inherits the chunk's
+    dialect: str | None = None
+    dialect_source: str = "source"
+    # the analyzer's verdict; None means it was not analysed
+    parses: bool | None = None
+    parse_error: str = ""
+    unknown_inspectors: tuple[str, ...] = ()
 
 
 @dataclass
 class IndexData:
     sources: list[SourceRow] = field(default_factory=list)
     chunks: list[ChunkRow] = field(default_factory=list)
+    # recorded in meta so an index says which analyzer judged its examples
+    analyzer_version: str = ""
 
     @property
     def example_count(self) -> int:
@@ -174,15 +200,16 @@ def write_index(path: Path, data: IndexData, *, built_at: datetime | None = None
             chunk_id = cursor.lastrowid
             connection.executemany(
                 "INSERT INTO examples (chunk_id, source_id, path, section_path, dialect, form,"
-                " query, answers, errors, result_type, incomplete, context)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " query, answers, errors, result_type, incomplete, context, dialect_source,"
+                " parses, parse_error, unknown_inspectors)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         chunk_id,
                         chunk.source_id,
                         chunk.path,
                         _section_text(chunk.section_path),
-                        chunk.dialect,
+                        example.dialect or chunk.dialect,
                         example.form,
                         example.query,
                         json.dumps(example.answers),
@@ -190,6 +217,10 @@ def write_index(path: Path, data: IndexData, *, built_at: datetime | None = None
                         example.result_type,
                         int(example.incomplete),
                         example.context,
+                        example.dialect_source,
+                        None if example.parses is None else int(example.parses),
+                        example.parse_error,
+                        json.dumps(example.unknown_inspectors),
                     )
                     for example in chunk.examples
                 ],
@@ -197,17 +228,17 @@ def write_index(path: Path, data: IndexData, *, built_at: datetime | None = None
         connection.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
         connection.execute("INSERT INTO examples_fts(examples_fts) VALUES ('rebuild')")
         when = (built_at or datetime.now(UTC)).replace(microsecond=0).isoformat()
-        connection.executemany(
-            "INSERT INTO meta VALUES (?, ?)",
-            [
-                ("schema_version", str(SCHEMA_VERSION)),
-                ("built_at", when),
-                ("sqlite_version", sqlite3.sqlite_version),
-                ("source_count", str(len(data.sources))),
-                ("chunk_count", str(len(data.chunks))),
-                ("example_count", str(data.example_count)),
-            ],
-        )
+        meta = [
+            ("schema_version", str(SCHEMA_VERSION)),
+            ("built_at", when),
+            ("sqlite_version", sqlite3.sqlite_version),
+            ("source_count", str(len(data.sources))),
+            ("chunk_count", str(len(data.chunks))),
+            ("example_count", str(data.example_count)),
+        ]
+        if data.analyzer_version:
+            meta.append(("analyzer_version", data.analyzer_version))
+        connection.executemany("INSERT INTO meta VALUES (?, ?)", meta)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         connection.commit()
     except BaseException:

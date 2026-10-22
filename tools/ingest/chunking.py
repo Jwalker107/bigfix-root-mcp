@@ -44,6 +44,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 # `Q: text`, or a bare `Q:`. A drive letter such as `Q:\data` must not match.
 _FIELD_RE = re.compile(r"^([QAIET]):(?:$| (.*)$|([^\s\\/].*)$)")
 _STUB_RE = re.compile(r"^no documentation exists\.?$", re.IGNORECASE)
+_BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
 
 _TEMPLATE_RE = re.compile(r"\{%.*?%\}")
 # `{{ 'file' | linkType }}` renders as a link whose text is the quoted string
@@ -263,12 +264,17 @@ def _fence_block(lang: str, lines: list[str]) -> _Block:
             examples = parse_cases(lines)
             for example in examples:
                 example.form = FORM_FENCE_QA
-    elif lang == "relevance" and code.strip():
+    elif lang == "relevance":
+        # A blank line separates statements: one fence can hold several queries
+        # (guide/basics/introspectors.md has two). A single query with a blank line
+        # inside it would be split, but no example in the pinned docs is written so.
         examples = [
             Example(
-                query="\n".join(line.rstrip() for line in code.split("\n")).strip(),
+                query="\n".join(line.rstrip() for line in group.split("\n")).strip(),
                 form=FORM_FENCE_RELEVANCE,
             )
+            for group in _BLANK_LINE_RE.split(code)
+            if group.strip()
         ]
     return _Block("code", rendered, examples)
 

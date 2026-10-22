@@ -52,6 +52,20 @@ to "improve" into problems:
   guessing would be a lie, so they are included and labelled.
 - **Examples carry documented answers, not verified ones.** The documentation
   says what an example returns; nothing here ran it against a server.
+- **The analyzer's verdict labels examples; it does not rank or hide them.**
+  About one bare-fence example in four does not parse, so `parses: false` is
+  shown with the reason instead of dropping the example. A failing example can
+  also be the point (one that documents an error), and an unknown inspector is as
+  likely to be newer documentation than a mistake, so the verdict is evidence
+  for the reader, not a filter.
+- **A dialect is inferred only when the analyzer is definite.** `both`, a
+  conflict between its two signals, or a query that does not parse all leave an
+  example `unknown`, and a dialect the source states is never overridden. An
+  inferred label says so (`dialect_source: analyzer`). Guessing more would make
+  the dialect filter confidently wrong.
+- **The index is rebuilt, not migrated.** It is derived data that rebuilds in
+  seconds, so a schema change bumps the version, and a server and an index that
+  disagree say so and ask for a rebuild instead of guessing.
 
 ## Which writes, and why only these
 

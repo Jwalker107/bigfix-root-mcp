@@ -95,6 +95,18 @@ class TestFences:
         (ex,) = examples("# h\n\n```relevance\n(name of it,\n id of it) of bes computers\n```\n")
         assert ex.query == "(name of it,\n id of it) of bes computers"
 
+    def test_blank_lines_separate_the_queries_in_one_fence(self):
+        text = "# h\n\n```relevance\nnumber of bes computers\n\n  \nnames of bes sites\n```\n"
+        parsed = parse(text)
+        found = [ex for chunk in parsed.chunks for ex in chunk.examples]
+        assert [e.query for e in found] == ["number of bes computers", "names of bes sites"]
+        assert all(e.form == FORM_FENCE_RELEVANCE for e in found)
+        # the chunk text still shows the fence exactly as written
+        assert parsed.chunks[0].text.count("```") == 2
+
+    def test_a_relevance_fence_of_only_blank_lines_makes_no_example(self):
+        assert examples("# h\n\n```relevance\n\n\n```\n") == []
+
     def test_plain_fence_with_q_and_a_lines_gives_cases(self):
         text = (
             "# h\n\n```\n// Only defined for Apple version strings\n"

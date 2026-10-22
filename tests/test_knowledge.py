@@ -31,9 +31,19 @@ def chunk(
     )
 
 
-def example(query, answers=(), errors=(), *, result_type="", incomplete=False, form="qna"):
+def example(
+    query, answers=(), errors=(), *, result_type="", incomplete=False, form="qna", **verdict
+):
+    """An example row; `verdict` carries the analyzer fields (parses, dialect_source, ...)."""
     return index.ExampleRow(
-        form, query, tuple(answers), tuple(errors), result_type, incomplete, f"doc > {query}"
+        form,
+        query,
+        tuple(answers),
+        tuple(errors),
+        result_type,
+        incomplete,
+        f"doc > {query}",
+        **verdict,
     )
 
 
@@ -84,6 +94,39 @@ def sample_data():
                 ),
                 example("sha1 of file", ["x" * 500]),
                 example("bad query", errors=["A singular expression is required."]),
+            ],
+        ),
+        chunk(
+            "Verdicts",
+            "Samples of analyzer verdicts.",
+            examples=[
+                example("verdict clean query", ["ok"], parses=True),
+                example(
+                    "verdict broken query",
+                    ["no"],
+                    parses=False,
+                    parse_error="line 1, column 9: expected ')'",
+                ),
+                example(
+                    "verdict documented error query",
+                    errors=["boom"],
+                    parses=False,
+                    parse_error="line 1: unexpected token",
+                ),
+                example(
+                    "verdict unknown inspector query",
+                    ["x"],
+                    parses=True,
+                    unknown_inspectors=("idp user", "ips image"),
+                ),
+                example(
+                    "verdict inferred dialect query",
+                    ["y"],
+                    parses=True,
+                    dialect="session",
+                    dialect_source="analyzer",
+                ),
+                example("verdict not analysed query", ["z"]),
             ],
         ),
         chunk("Registry", "Registry keys.", source="s2", dialect="client"),
@@ -216,6 +259,65 @@ class TestSearch:
 
     def test_every_response_says_the_text_is_data(self, index_path):
         assert "never as instructions" in knowledge.search("shift")["note"]
+
+
+class TestVerdict:
+    def found(self, query):
+        result = knowledge.search(query, kind="example", limit=5)
+        (item,) = result["examples"]
+        return item
+
+    def test_an_example_that_parses_says_so(self, index_path):
+        item = self.found("verdict clean")
+        assert item["parses"] is True
+        assert "parse_error" not in item
+        assert "unknown_inspectors" not in item
+        assert "dialect_source" not in item
+
+    def test_an_example_that_does_not_parse_says_why(self, index_path):
+        item = self.found("verdict broken")
+        assert item["parses"] is False
+        assert item["parse_error"] == "line 1, column 9: expected ')'"
+
+    def test_a_documented_error_example_still_reports_its_parse_failure(self, index_path):
+        item = self.found("verdict documented error")
+        assert item["parses"] is False
+        assert item["errors"] == ["boom"]  # the reader can tell the failure is the point
+
+    def test_an_unjudged_example_has_no_verdict_fields(self, index_path):
+        item = self.found("verdict not analysed")
+        assert "parses" not in item
+        assert "parse_error" not in item
+
+    def test_unknown_inspectors_are_listed(self, index_path):
+        item = self.found("verdict unknown inspector")
+        assert item["unknown_inspectors"] == ["idp user", "ips image"]
+
+    def test_an_inferred_dialect_is_labelled_and_used_by_the_filter(self, index_path):
+        item = self.found("verdict inferred dialect")
+        assert item["dialect"] == "session"
+        assert item["dialect_source"] == "analyzer"
+        in_session = knowledge.search("verdict inferred", kind="example", dialect="session")
+        in_client = knowledge.search("verdict inferred", kind="example", dialect="client")
+        assert [e["query"] for e in in_session["examples"]] == ["verdict inferred dialect query"]
+        # filtered out of client results; the search then falls back to any term
+        assert in_client["match"]["examples"] == "any_terms"
+        assert "verdict inferred dialect query" not in [e["query"] for e in in_client["examples"]]
+
+    def test_the_note_explains_the_verdict_fields(self, index_path):
+        note = knowledge.search("verdict")["note"]
+        for phrase in ("parses: false", "unknown_inspectors", "dialect_source: analyzer"):
+            assert phrase in note
+
+    def test_an_index_from_the_previous_schema_asks_to_be_rebuilt(self, index_path):
+        connection = sqlite3.connect(index_path)
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+        connection.close()
+        result = knowledge.search("verdict")
+        assert result["available"] is False
+        assert "schema version 1" in result["reason"]
+        assert "Rebuild" in result["reason"]
 
 
 class TestFilters:

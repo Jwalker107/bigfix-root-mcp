@@ -29,15 +29,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bigfix_relevance_analyzer import (
-    Dialect,
-    LintConfig,
-    analyze_relevance,
-    is_definite,
-    lint_analysis,
-)
-
-from tools.ingest import fetch
+from tools.ingest import fetch, verdict
 
 log = logging.getLogger("corpus.eval")
 
@@ -45,8 +37,6 @@ INDEX_NAME = "relevance.sqlite"
 TOP_UNKNOWN_INSPECTORS = 15
 TOP_FINDING_CODES = 10
 CSV_QUERY_CHARS = 200
-
-_PINNED = {"session": Dialect.SESSION, "client": Dialect.CLIENT}
 
 
 @dataclass
@@ -81,11 +71,16 @@ class Result:
 
 
 def load_examples(index_path: Path) -> list[ExampleRow]:
-    """Read every example from the index (read-only)."""
+    """Read every example from the index (read-only).
+
+    An example's dialect counts only when its source stated it. One the build
+    labelled from this same analyzer is reported as 'unknown': pinning it to its
+    own inferred dialect would make the mismatch check circular.
+    """
     connection = sqlite3.connect(index_path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         rows = connection.execute(
-            "SELECT id, source_id, path, dialect, form, query, errors, incomplete "
+            "SELECT id, source_id, path, dialect, form, query, errors, incomplete, dialect_source "
             "FROM examples ORDER BY id"
         ).fetchall()
     finally:
@@ -95,7 +90,7 @@ def load_examples(index_path: Path) -> list[ExampleRow]:
             example_id=row[0],
             source_id=row[1],
             path=row[2],
-            dialect=row[3],
+            dialect=row[3] if row[8] == "source" else "unknown",
             form=row[4],
             query=row[5],
             documents_error=bool(json.loads(row[6])),
@@ -105,34 +100,23 @@ def load_examples(index_path: Path) -> list[ExampleRow]:
     ]
 
 
-def _value(dialect: Dialect | None) -> str:
-    return "" if dialect is None else dialect.value
-
-
 def analyze_example(row: ExampleRow) -> Result:
     """Analyze one example with its dialect pinned when the source states it."""
-    pinned_name = row.dialect if row.dialect in _PINNED else ""
-    pinned = _PINNED.get(pinned_name)
-    result = Result(row=row, pinned=pinned_name)
-    try:
-        report = analyze_relevance(row.query, dialect=pinned)
-        findings = lint_analysis(report, LintConfig(dialect=pinned, suggest=False))
-    except Exception as err:  # the analyzer must never be the reason a run stops
-        result.crashed = f"{type(err).__name__}: {err}"
-        return result
-    result.parsed = bool(report.parsed)
-    result.parse_error = "" if report.parse_error is None else str(report.parse_error)
-    result.effective = _value(report.dialect)
-    result.classified = _value(report.classified_dialect)
-    result.resolved = _value(report.resolved_dialect)
-    if pinned is not None:
-        result.mismatch = any(
-            observed is not None and is_definite(observed) and observed is not pinned
-            for observed in (report.classified_dialect, report.resolved_dialect)
-        )
-    result.findings = [(finding.code, finding.severity.value) for finding in findings]
-    result.unknown_inspectors = list(report.unknown_references)
-    return result
+    pinned = row.dialect if row.dialect in verdict.PINNABLE else ""
+    found = verdict.analyze_query(row.query, pinned)
+    return Result(
+        row=row,
+        pinned=pinned,
+        parsed=found.parsed,
+        parse_error=found.parse_error,
+        effective=found.effective,
+        classified=found.classified,
+        resolved=found.resolved,
+        mismatch=found.mismatch,
+        findings=list(found.findings),
+        unknown_inspectors=list(found.unknown_inspectors),
+        crashed=found.crashed,
+    )
 
 
 def analyze_all(rows: Iterable[ExampleRow]) -> list[Result]:

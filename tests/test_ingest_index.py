@@ -192,3 +192,71 @@ def test_duplicate_source_ids_are_rejected(tmp_path):
     data.sources.append(index.SourceRow("s1", "git", "x", "y"))
     with pytest.raises(ValueError, match="duplicate"):
         index.write_index(tmp_path / "relevance.sqlite", data)
+
+
+def verdict_rows(path):
+    connection = sqlite3.connect(path)
+    try:
+        return connection.execute(
+            "SELECT query, dialect, dialect_source, parses, parse_error, unknown_inspectors"
+            " FROM examples ORDER BY id"
+        ).fetchall()
+    finally:
+        connection.close()
+
+
+def data_with_verdicts():
+    data = sample_data()
+    data.analyzer_version = "9.9.9"
+    data.chunks[0].examples = [
+        index.ExampleRow(
+            "qna", "q1", ("a",), (), "", False, "c",
+            dialect="session", dialect_source="analyzer", parses=True,
+            unknown_inspectors=("idp user",),
+        ),
+        index.ExampleRow("qna", "q2", (), (), "", False, "c", parses=False, parse_error="bad"),
+        index.ExampleRow("qna", "q3", (), (), "", False, "c"),
+    ]  # fmt: skip
+    return data
+
+
+def test_example_verdicts_round_trip(tmp_path):
+    path = tmp_path / "relevance.sqlite"
+    data = data_with_verdicts()
+    index.write_index(path, data, built_at=BUILT)
+    inherited = data.chunks[0].dialect
+    assert verdict_rows(path) == [
+        ("q1", "session", "analyzer", 1, "", '["idp user"]'),
+        ("q2", inherited, "source", 0, "bad", "[]"),
+        ("q3", inherited, "source", None, "", "[]"),  # NULL: not analysed
+    ]
+
+
+def test_the_analyzer_version_is_recorded_only_when_there_is_one(tmp_path):
+    with_version, without = tmp_path / "a.sqlite", tmp_path / "b.sqlite"
+    index.write_index(with_version, data_with_verdicts(), built_at=BUILT)
+    index.write_index(without, sample_data(), built_at=BUILT)
+
+    def meta(path):
+        connection = sqlite3.connect(path)
+        try:
+            return dict(connection.execute("SELECT key, value FROM meta"))
+        finally:
+            connection.close()
+
+    assert meta(with_version)["analyzer_version"] == "9.9.9"
+    assert "analyzer_version" not in meta(without)
+    assert meta(with_version)["schema_version"] == "2"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"dialect_source": "guess"}, {"dialect": "martian"}],
+)
+def test_the_schema_refuses_an_unknown_dialect_or_dialect_source(tmp_path, bad):
+    data = sample_data()
+    data.chunks[0].examples = [index.ExampleRow("qna", "q", (), (), "", False, "c", **bad)]
+    path = tmp_path / "relevance.sqlite"
+    with pytest.raises(sqlite3.IntegrityError):
+        index.write_index(path, data, built_at=BUILT)
+    assert not path.exists()

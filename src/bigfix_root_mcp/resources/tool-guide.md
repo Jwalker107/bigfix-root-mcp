@@ -45,6 +45,13 @@ write the expression, run `analyze_relevance`, then confirm with a bounded query
 If it answers `available: false`, no index is configured; `how_to_enable` says
 how, and the other tools still work.
 
+Each example carries the offline analyzer's verdict. `parses: false` (with a
+`parse_error`) means it could not be parsed, so do not copy its syntax, unless
+its `errors` are documented, in which case the failure may be the point.
+`unknown_inspectors` names inspectors the analyzer's snapshot lacks: newer
+documentation, or a typo. `dialect_source: analyzer` means the source did not
+state the dialect and the analyzer inferred it.
+
 `dialect` keeps items for session or client relevance plus those that apply to
 both or do not say, so an `unknown` item may still be the wrong dialect for you.
 `match: any_terms` means no result contained every word you gave.

@@ -141,7 +141,7 @@ Environment variables win over config files:
 | qna inventory | `BIGFIX_QNA_INVENTORY`: path to a remote_clients.toml, or `0` for none (see [qna evaluation](#qna-evaluation)) | `~/.bigfix/remote_clients.toml`, then the all-users config dir |
 | qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
-| Knowledge index | `BIGFIX_KNOWLEDGE_INDEX`: path to the `relevance.sqlite` built by `python -m tools.ingest.build` (see [docs/knowledge-retrieval-plan.md](docs/knowledge-retrieval-plan.md)). Read-only; read on every call, so a rebuilt index is picked up without a restart | unset (`search_relevance_docs` reports it is unavailable) |
+| Knowledge index | `BIGFIX_KNOWLEDGE_INDEX`: path to the `relevance.sqlite` built by `python -m tools.ingest.build` (see [docs/knowledge-retrieval-plan.md](docs/knowledge-retrieval-plan.md)). Read-only; read on every call, so a rebuilt index is picked up without a restart. An index and a server must agree on the schema version, and a mismatch is reported (rebuild the index, or restart after upgrading the server) | unset (`search_relevance_docs` reports it is unavailable) |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
 Config files are searched in besapi's order: `/etc/besapi.conf`,

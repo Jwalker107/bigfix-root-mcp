@@ -27,7 +27,7 @@ from pathlib import Path
 
 INDEX_ENV = "BIGFIX_KNOWLEDGE_INDEX"
 # the index schema this code reads (tools/ingest/index.py writes it)
-SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSION = 2
 
 DEFAULT_LIMIT = 5
 MAX_SEARCH_LIMIT = 25
@@ -62,7 +62,12 @@ _NOTE = (
     "source does not say, not that the item applies to neither; 'both' and "
     "'unknown' items are included whichever dialect you ask for. An example's "
     "answers are what the documentation says it returns, not something checked "
-    "against your server."
+    "against your server. An example's `parses: false` means the offline analyzer "
+    "could not parse it: when `errors` are documented that can be the point of the "
+    "example, otherwise treat its syntax as unreliable. `unknown_inspectors` names "
+    "inspectors the analyzer's snapshot lacks (newer documentation, or a typo). "
+    "`dialect_source: analyzer` means the source did not state the dialect and the "
+    "analyzer inferred it."
 )
 
 _HOW_TO_ENABLE = (
@@ -80,7 +85,8 @@ _CHUNK_SQL = (
 )
 _EXAMPLE_SQL = (
     "SELECT e.source_id, e.path, e.section_path, e.dialect, e.form, e.query, e.answers, "
-    "e.errors, e.result_type, e.incomplete, e.context "
+    "e.errors, e.result_type, e.incomplete, e.context, e.dialect_source, e.parses, "
+    "e.parse_error, e.unknown_inspectors "
     "FROM examples_fts JOIN examples AS e ON e.id = examples_fts.rowid "
     "WHERE examples_fts MATCH ?{extra} "
     f"ORDER BY bm25(examples_fts, {', '.join(str(w) for w in _EXAMPLE_WEIGHTS)}), e.id LIMIT ?"
@@ -226,6 +232,15 @@ def _example_result(row: sqlite3.Row) -> dict:
         out["result_type"] = row["result_type"]
     if row["incomplete"]:
         out["incomplete"] = True
+    if row["parses"] is not None:  # NULL: the analyzer did not judge it
+        out["parses"] = bool(row["parses"])
+        if not row["parses"] and row["parse_error"]:
+            out["parse_error"] = row["parse_error"]
+    unknown_inspectors = json.loads(row["unknown_inspectors"])
+    if unknown_inspectors:
+        out["unknown_inspectors"] = unknown_inspectors
+    if row["dialect_source"] == "analyzer":
+        out["dialect_source"] = "analyzer"
     return out
 
 

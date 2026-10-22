@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
-from tools.ingest import chunking, convert, fetch, gitsource, index, scan
+from tools.ingest import chunking, convert, fetch, gitsource, index, scan, verdict
 
 log = logging.getLogger("corpus.build")
 
@@ -54,6 +54,8 @@ STATUS_SKIPPED = "skipped"
 STATUS_ERROR = "error"
 
 MAX_LISTED_WARNINGS = 15
+# an analyzer parse error is stored with its example; keep it short
+PARSE_ERROR_CHARS = 200
 # below this a chunk could not hold a heading and a line of text
 MIN_CHUNK_CHARS = 200
 
@@ -131,6 +133,8 @@ class SourceReport:
     stub_sections: int = 0
     empty_sections: int = 0
     leftover_templates: int = 0
+    examples_unparsed: int = 0  # indexed examples the analyzer could not parse
+    examples_relabelled: int = 0  # unknown-dialect examples the analyzer labelled
     skipped_files: Counter = field(default_factory=Counter)
 
 
@@ -330,11 +334,13 @@ def build(
             findings.extend(scan.scan_text(item.source.id, document.path, document.text))
     findings = scan.apply_allowlist(findings, allowed or set())
 
-    data = index.IndexData()
+    data = index.IndexData(analyzer_version=verdict.analyzer_version())
     if any(f.severity == scan.BLOCK for f in findings):
         return BuildResult(reports, findings, data, EXIT_SECRET)
 
     seen_examples: set[tuple] = set()
+    # the same query analysed under the same pin gives the same verdict
+    verdicts: dict[tuple[str, str], verdict.Verdict] = {}
     by_id = {report.id: report for report in reports}
     for item in loaded:
         report = by_id[item.source.id]
@@ -363,11 +369,27 @@ def build(
                     text=chunk.text,
                 )
                 for example in chunk.examples:
-                    key = (dialect, example.query, example.answers, example.errors)
+                    pinned = dialect if dialect in verdict.PINNABLE else ""
+                    found = verdicts.get((example.query, pinned))
+                    if found is None:
+                        found = verdicts[(example.query, pinned)] = verdict.analyze_query(
+                            example.query, pinned
+                        )
+                    # The analyzer labels only what no source states, and only when it
+                    # is definite and consistent; a stated dialect is never overridden.
+                    example_dialect, dialect_source = dialect, "source"
+                    if dialect == "unknown":
+                        label = verdict.inferred_dialect(found)
+                        if label:
+                            example_dialect, dialect_source = label, "analyzer"
+                    key = (example_dialect, example.query, example.answers, example.errors)
                     if key in seen_examples:
                         report.duplicate_examples += 1
                         continue
                     seen_examples.add(key)
+                    judged = not found.crashed
+                    report.examples_relabelled += dialect_source == "analyzer"
+                    report.examples_unparsed += judged and not found.parsed
                     row.examples.append(
                         index.ExampleRow(
                             form=example.form,
@@ -377,6 +399,11 @@ def build(
                             result_type=example.result_type,
                             incomplete=example.incomplete,
                             context=_example_context(chunk.section_path, example),
+                            dialect=example_dialect,
+                            dialect_source=dialect_source,
+                            parses=found.parsed if judged else None,
+                            parse_error=(found.parse_error or found.crashed)[:PARSE_ERROR_CHARS],
+                            unknown_inspectors=found.unknown_inspectors,
                         )
                     )
                 data.chunks.append(row)
@@ -402,6 +429,8 @@ def format_report(result: BuildResult, index_path: Path, *, dry_run: bool) -> st
                 f" duplicate-examples={report.duplicate_examples}"
                 f" stub-sections={report.stub_sections} empty-sections={report.empty_sections}"
                 f" template-leftovers={report.leftover_templates}"
+                f" examples-unparsed={report.examples_unparsed}"
+                f" dialect-labelled={report.examples_relabelled}"
             )
             lines.append(head + extra)
             if report.skipped_files:

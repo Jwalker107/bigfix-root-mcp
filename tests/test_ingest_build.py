@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import sys
 from datetime import UTC, datetime
+from typing import ClassVar
 
 import pytest
 
@@ -519,3 +520,130 @@ class TestMain:
         args = self.write_manifests(tmp_path, url_rows=[url_row(tmp_path)])
         args[1] = str(tmp_path / "no-such-git-sources.csv")
         assert build.main(args) == build.EXIT_OK
+
+
+class TestAnalyzerVerdict:
+    """The offline analyzer's verdict is stored with each example (schema version 2)."""
+
+    FILES: ClassVar[dict[str, str]] = {
+        "pages/_reference/docs/thing.md": (
+            "# thing\n\nText.\n\n```\n"
+            "Q: names of bes computers\nA: PC1\n\n"
+            'Q: exists file "x" whose (nonsense of it)\nA: True\n\n'
+            'Q: bit 0 of bit set "10"\nA: False\n\n'
+            "Q: number of of bes computers\nE: boom\n"
+            "```\n"
+        ),
+        "pages/guide/session/s.md": (
+            "# s\n\nText.\n\n```relevance\nlinks (name of it)) of bes computers\n```\n"
+        ),
+        "pages/guide/client/c.md": (
+            "# c\n\nText.\n\n{% qna %}\nQ: number of bes computers\nA: 3\n{% endqna %}\n"
+        ),
+    }
+
+    @pytest.fixture
+    def built(self, tmp_path):
+        path = make_repo(tmp_path / "upstream")
+        commit = commit_files(path, self.FILES)
+        row = git_row(path, commit, source_id=GIT_ID)
+        gitsource.sync_git_source(row, tmp_path / "raw", allow_schemes=("file",))
+        result = run(tmp_path, [row])
+        assert result.exit_code == build.EXIT_OK
+        return tmp_path, row, result
+
+    def by_query(self, tmp_path):
+        found = rows(
+            tmp_path,
+            "SELECT query, dialect, dialect_source, parses, unknown_inspectors, parse_error"
+            " FROM examples",
+        )
+        return {query: rest for query, *rest in found}
+
+    def test_an_unknown_dialect_is_labelled_only_when_the_analyzer_is_definite(self, built):
+        examples = self.by_query(built[0])
+        assert examples["names of bes computers"][:3] == ["session", "analyzer", 1]
+        assert examples['exists file "x" whose (nonsense of it)'][:3] == ["client", "analyzer", 1]
+
+    def test_a_query_valid_in_both_dialects_stays_unknown(self, built):
+        # the analyzer resolves it as 'both': not evidence for either, so no label
+        assert self.by_query(built[0])['bit 0 of bit set "10"'][:3] == ["unknown", "source", 1]
+
+    def test_a_query_that_does_not_parse_is_never_labelled(self, built):
+        # the text looks like session relevance, but a broken query is not evidence
+        found = self.by_query(built[0])["number of of bes computers"]
+        assert found[:3] == ["unknown", "source", 0]
+        assert found[4]  # the parse error is kept
+
+    def test_a_stated_dialect_is_never_overridden(self, built):
+        examples = self.by_query(built[0])
+        # a session-looking query under guide/client stays client
+        assert examples["number of bes computers"][:3] == ["client", "source", 1]
+        # a broken query under guide/session stays session, and is flagged
+        broken = examples["links (name of it)) of bes computers"]
+        assert broken[:3] == ["session", "source", 0]
+        assert "unexpected" in broken[4]
+
+    def test_unknown_inspectors_are_stored(self, built):
+        examples = self.by_query(built[0])
+        assert json.loads(examples['exists file "x" whose (nonsense of it)'][3]) == ["nonsense"]
+        assert json.loads(examples["names of bes computers"][3]) == []
+
+    def test_the_report_counts_labelled_and_unparsed_examples(self, built):
+        tmp_path, _, result = built
+        assert result.reports[0].examples_relabelled == 2
+        assert result.reports[0].examples_unparsed == 2
+        report = build.format_report(result, tmp_path / "index" / "relevance.sqlite", dry_run=False)
+        assert "examples-unparsed=2" in report
+        assert "dialect-labelled=2" in report
+
+    def test_the_index_records_which_analyzer_judged_the_examples(self, built):
+        from tools.ingest import verdict
+
+        meta = dict(rows(built[0], "SELECT key, value FROM meta"))
+        assert meta["analyzer_version"] == verdict.analyzer_version()
+        assert meta["schema_version"] == "2"
+
+    def test_an_analyzer_crash_leaves_examples_unjudged_not_the_build_failed(
+        self, tmp_path, monkeypatch
+    ):
+        from tools.ingest import verdict
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("analyzer bug")
+
+        monkeypatch.setattr(verdict, "analyze_relevance", boom)
+        path = make_repo(tmp_path / "upstream")
+        commit = commit_files(path, self.FILES)
+        row = git_row(path, commit, source_id=GIT_ID)
+        gitsource.sync_git_source(row, tmp_path / "raw", allow_schemes=("file",))
+        result = run(tmp_path, [row])
+        assert result.exit_code == build.EXIT_OK
+        found = rows(tmp_path, "SELECT parses, parse_error, dialect, dialect_source FROM examples")
+        assert found
+        assert all(parses is None for parses, *_ in found)
+        assert all("analyzer bug" in error for _, error, *_ in found)
+        assert {dialect for *_, dialect, _source in found} <= {"unknown", "session", "client"}
+        assert all(source == "source" for *_, source in found)  # nothing was labelled
+        assert result.reports[0].examples_unparsed == 0  # an unjudged example is not "unparsed"
+
+    def test_the_same_query_under_the_same_pin_is_analysed_once(self, tmp_path, monkeypatch):
+        from tools.ingest import verdict
+
+        calls = []
+        real = verdict.analyze_relevance
+
+        def spy(text, **kwargs):
+            calls.append(text)
+            return real(text, **kwargs)
+
+        monkeypatch.setattr(verdict, "analyze_relevance", spy)
+        page = "# p\n\nText.\n\n{% qna %}\nQ: number of bes computers\nA: 3\n{% endqna %}\n"
+        path = make_repo(tmp_path / "upstream")
+        commit = commit_files(
+            path, {"pages/guide/client/a.md": page, "pages/guide/client/b.md": page}
+        )
+        row = git_row(path, commit, source_id=GIT_ID)
+        gitsource.sync_git_source(row, tmp_path / "raw", allow_schemes=("file",))
+        run(tmp_path, [row])
+        assert calls == ["number of bes computers"]

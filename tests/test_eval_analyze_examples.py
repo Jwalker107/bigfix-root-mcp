@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from tools.eval import analyze_examples as ae
-from tools.ingest import index
+from tools.ingest import index, verdict
 
 
 def row(
@@ -98,21 +98,21 @@ class TestAnalyzeExample:
         def boom(*_args, **_kwargs):
             raise RuntimeError("analyzer bug")
 
-        monkeypatch.setattr(ae, "analyze_relevance", boom)
+        monkeypatch.setattr(verdict, "analyze_relevance", boom)
         found = ae.analyze_example(row("anything"))
         assert found.parsed is False
         assert "analyzer bug" in found.crashed
         assert found.row.query == "anything"
 
     def test_one_crash_does_not_stop_the_rest(self, monkeypatch):
-        real = ae.analyze_relevance
-        monkeypatch.setattr(
-            ae,
-            "analyze_relevance",
-            lambda text, **kw: (
-                (_ for _ in ()).throw(ValueError("x")) if text == "bad" else real(text, **kw)
-            ),
-        )
+        real = verdict.analyze_relevance
+
+        def sometimes_boom(text, **kwargs):
+            if text == "bad":
+                raise ValueError("x")
+            return real(text, **kwargs)
+
+        monkeypatch.setattr(verdict, "analyze_relevance", sometimes_boom)
         found = ae.analyze_all([row("bad", example_id=1), row('exists file "x"', example_id=2)])
         assert [bool(r.crashed) for r in found] == [True, False]
         assert found[1].parsed is True
