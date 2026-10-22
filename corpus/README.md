@@ -40,5 +40,12 @@ Real questions (company content, so everything stays under `eval/questions/`):
     python -m tools.eval.questions review                  # readable sheet to review
     python -m tools.eval.questions summary                 # counts only
 
+Reference fixlets (company content: the sources, checkouts, read log and index are all
+untracked; the steps are in `docs/reference-fixlets.md`):
+
+    python -m tools.ingest.fixlets --source ID           # read one source, record when
+    python -m tools.ingest.fixletbuild --all --dry-run    # analyse every listed source
+    python -m tools.ingest.fixletbuild --all              # write index/fixlets.sqlite
+
 The index is rebuilt, not migrated, when its schema version changes: a server
 that reads a different version says so and asks for a rebuild.

@@ -678,6 +678,9 @@ scores with and without the hold-out only for comparison.
 
 #### Steps
 
+How to build the index from each kind of source, step by step:
+[reference-fixlets.md](reference-fixlets.md).
+
 | Step | Work | Done when |
 |---|---|---|
 | 6a (done 2026-10-22) | Move the `.bes` parser to `tools/ingest/bes.py`; the question tool uses it | Its candidates output is byte-identical on the real source (183 candidates); the question tests pass with only their import repointed. Two fixes came with the move: `.BES` is found on case-sensitive systems, and symbolic links and Windows junctions are never followed |
@@ -749,7 +752,12 @@ the Phase 5 golden set early, because it decides whether to continue.
    `python -m tools.ingest.gitsource`, `python -m tools.ingest.fetch`,
    `python -m tools.ingest.build --dry-run`, then `python -m tools.ingest.build`.
    Point `BIGFIX_KNOWLEDGE_INDEX` at the result to use it from the server.
-2. Continue with Phase 4 (the `write_relevance` prompt and curated resources).
-   The tool it drives is `search_relevance_docs`; the index schema is in
-   `tools/ingest/index.py`, and `examples` already holds the query, expected
-   answers/errors, dialect and context that Phase 5 turns into a golden set.
+2. Rebuild the reference fixlet index (Phase 6) from the sources you list: the
+   steps for each kind of source are in [reference-fixlets.md](reference-fixlets.md).
+   Point `BIGFIX_FIXLET_INDEX` at `corpus/index/fixlets.sqlite`.
+3. Phases 0 to 4 and Phase 6 steps 6a to 6e are done. Continue with Phase 5b
+   (scoring answers with and without retrieval, holding out each question's own
+   source with `BIGFIX_FIXLET_HOLDOUT`), which wants more questions first, especially
+   session relevance. The tools it drives are `search_relevance_docs` and
+   `search_reference_fixlets`; the index schemas are in `tools/ingest/index.py` and
+   `tools/ingest/fixletindex.py`.
