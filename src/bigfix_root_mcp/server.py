@@ -147,6 +147,24 @@ _RESOURCES = {
         "Client relevance cookbook",
         "Client (fast query) relevance, targeting forms, and how to read cumulative results.",
     ),
+    "bigfix://relevance/authoring-guide": (
+        "authoring-guide.md",
+        "Relevance authoring guide",
+        (
+            "Rules that prevent most relevance errors (plurals, existence, `it`, "
+            "strings), the common error messages with their usual causes, and how "
+            "applicability clauses combine. Examples are checked with the analyzer."
+        ),
+    ),
+    "bigfix://relevance/client-idioms": (
+        "client-idioms.md",
+        "Client relevance idioms",
+        (
+            "Documented client-relevance patterns for files, registry, applications, "
+            "services, operating system, versions, text and WMI. Examples are checked "
+            "with the analyzer."
+        ),
+    ),
     "bigfix://guide/tools": (
         "tool-guide.md",
         "Tool selection guide",

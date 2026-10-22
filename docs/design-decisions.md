@@ -67,6 +67,31 @@ to "improve" into problems:
   seconds, so a schema change bumps the version, and a server and an index that
   disagree say so and ask for a rebuild instead of guessing.
 
+## The write_relevance prompt: generic by default, team rules by configuration
+
+The prompt encodes an order of work (look up, check names, draft, analyze,
+evaluate bounded, report only what was verified) and sends a model to the
+authoring resources. Choices worth keeping:
+
+- **Team conventions are configuration, not shipped text.** How a team treats
+  proxy agents, or which guard idiom it uses, is not in any public documentation
+  and differs between teams. A file named by `BIGFIX_RELEVANCE_CONVENTIONS` is
+  added to the prompt as instructions; the shipped prompt contains none, and a test
+  checks that. The path is the operator's, never a caller's, and the file is read
+  on every call and size-capped.
+- **A conventions file that cannot be read is said so in the prompt.** A rule that
+  silently stopped applying is worse than a visible problem.
+- **Examples in the shipped resources are checked by the analyzer.** The same
+  measurements that found about one bare-fence example in four failing to parse
+  upstream are why a test parses every `relevance` snippet in the authoring
+  resources and requires no unknown inspectors. Guidance that fails its own
+  checker would teach exactly what it warns against.
+- **The prompt cannot name a tool that does not exist.** A test compares the tools
+  and resources it mentions with the registered ones.
+- **Evaluation is bounded and read-only.** One named computer, or a lab target,
+  never `target_all` unless asked; and nothing is described as working unless it
+  was run.
+
 ## Which writes, and why only these
 
 Three write tools exist: `stop_action`, `set_dashboard_variable`,

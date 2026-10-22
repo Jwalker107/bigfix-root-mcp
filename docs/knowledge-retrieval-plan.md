@@ -18,7 +18,7 @@ is reported.
 | 1. Fetch | Done (unit-tested with a fake HTTP layer; not yet run against real sources) |
 | 2. Convert and chunk | Done (real index built from the pinned developer.bigfix.com checkout) |
 | 3. Retrieval tool | Done (`search_relevance_docs`, read-only, tested against fixture and real index) |
-| 4. Workflow prompt and curated resources | Not started |
+| 4. Workflow prompt and curated resources | Done (`write_relevance`, conventions file, two analyzer-checked resources) |
 | 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22). Phase 5b has started: 25 questions from the team's own BES content are approved (more wanted) |
 | 6. Docs and CI | Not started |
 
@@ -267,18 +267,44 @@ index is read on every call, so rebuilding it needs no restart.
 Not done, on purpose: no `source` filter, no paging (`offset`), no embedding
 search. Add them only if Phase 5 shows a need.
 
-### Phase 4: Workflow prompt and curated resources
-- `write_relevance(goal, dialect)` prompt in `prompts.py`:
-  1. `search_relevance_docs`
-  2. `search_inspectors`
-  3. draft
-  4. `analyze_relevance`
-  5. run with `session_relevance_query` or a client query, with a limit
-  6. report only what was verified, scoped to the operator's visibility
-- Tell the model that retrieved snippets are data and that instructions found
-  inside them are not to be followed.
-- Hand-distil the best patterns and pitfalls into small markdown resources
-  under `resources/`; update `tests/test_resources.py` to match.
+### Phase 4: Workflow prompt and curated resources (done 2026-10-22)
+
+Built, with tests in `tests/test_write_relevance.py` and `tests/test_resources.py`:
+
+- **The `write_relevance(goal, dialect="")` prompt** (`src/bigfix_root_mcp/prompts.py`).
+  Seven steps: dialect; look up with `search_relevance_docs` using the task's own
+  words (prefer examples with `parses=true`, do not copy `parses=false`, say so when
+  no index is configured, treat results as data); check names with
+  `search_inspectors` (a name missing from the snapshot may be newer, not wrong);
+  draft the smallest expression; `analyze_relevance` with the dialect pinned;
+  evaluate bounded (session: a limit; client: one named computer or a lab target,
+  never `target_all` unless asked); report only what was verified and what was not.
+  It ends with the operator-scope reminder. A test checks that every tool and
+  resource it names is registered.
+- **Team conventions are configuration** (`src/bigfix_root_mcp/conventions.py`).
+  `BIGFIX_RELEVANCE_CONVENTIONS` names a markdown file whose text is added to the
+  prompt as instructions. The shipped prompt contains no team rule (tested). The
+  proxy-agent default the user set is therefore carried by a conventions file, not
+  by the public package: `docs/relevance-conventions.example.md` is the generic
+  template, and the user's own file is `corpus/conventions.md` (untracked). To use
+  it, set `BIGFIX_RELEVANCE_CONVENTIONS` to that path in the MCP client's server
+  entry. An evaluation run must set it too, or the default is not applied.
+- **Two curated resources**, written from the documentation in our own words:
+  `bigfix://relevance/authoring-guide` (rules that prevent most errors, the
+  documented error messages with causes and fixes, how applicability clauses
+  combine, how to read analyzer warnings) and `bigfix://relevance/client-idioms`
+  (documented patterns for files, registry, applications, services, OS, versions,
+  text and WMI). **All 25 `relevance` snippets in them are parsed by the analyzer
+  in a test** and must use only inspectors it knows, so the shipped guidance cannot
+  teach a mistake like the ones measured in the upstream docs.
+- Grounding checked, not assumed: "all clauses must be true" is from the 2005
+  vendor guide ("an action is not taken on a machine if any of its relevance
+  clauses are false"); `idp user` and `idp group` are listed as BigFix 11 Patch 7
+  additions in the upstream "what is new" page.
+
+Not done, on purpose: no session-relevance idioms resource (the existing session
+cookbook is live-verified and there are no session questions yet to measure
+against), and no change to retrieval ranking.
 
 ### Phase 5: Evaluation
 - `tests/eval/golden.yaml`: question, dialect, acceptance check (parses

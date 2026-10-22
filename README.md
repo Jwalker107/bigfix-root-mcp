@@ -99,13 +99,23 @@ pull on demand rather than repeating it in every tool description:
 | --- | --- |
 | `bigfix://relevance/session-cookbook` | Session relevance that works - every expression verified against a live root server - plus the operators that don't exist. |
 | `bigfix://relevance/client-cookbook` | Client (fast query) relevance, targeting forms, reading cumulative results. |
+| `bigfix://relevance/authoring-guide` | Rules that prevent most relevance errors, the common error messages with their usual causes, and how applicability clauses combine. Every example is checked with the analyzer. |
+| `bigfix://relevance/client-idioms` | Documented client-relevance patterns for files, registry, applications, services, OS, versions, text and WMI. Every example is checked with the analyzer. |
 | `bigfix://guide/tools` | Which tool answers which question, how to read bounded responses, what operator scope means. |
 | `bigfix://relevance/reference/dialects` | Client versus session relevance: where each is evaluated, which one a tool expects. |
 | `bigfix://relevance/reference/client-relevance` | Client relevance language reference (from bigfix-relevance-analyzer). |
 | `bigfix://relevance/reference/session-relevance` | Session relevance language reference (from bigfix-relevance-analyzer). |
 
 Prompts: `diagnose_computer`, `patch_status`, `find_stale_agents`,
-`troubleshoot_relevance`.
+`troubleshoot_relevance`, `write_relevance`.
+
+`write_relevance(goal, dialect)` walks a model through writing relevance: look it
+up with `search_relevance_docs`, check names with `search_inspectors`, draft,
+`analyze_relevance`, evaluate with a bounded query, and report only what was
+verified. If `BIGFIX_RELEVANCE_CONVENTIONS` names a markdown file, its text is
+added as house conventions (how your team treats proxy agents, guard idioms, and
+so on); a starting point is in
+[docs/relevance-conventions.example.md](docs/relevance-conventions.example.md).
 
 Relevance errors also carry a cause hint: the server recognizes the common
 failure shapes (a non-existent limiting operator, client relevance in a
@@ -142,6 +152,7 @@ Environment variables win over config files:
 | qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Knowledge index | `BIGFIX_KNOWLEDGE_INDEX`: path to the `relevance.sqlite` built by `python -m tools.ingest.build` (see [docs/knowledge-retrieval-plan.md](docs/knowledge-retrieval-plan.md)). Read-only; read on every call, so a rebuilt index is picked up without a restart. An index and a server must agree on the schema version, and a mismatch is reported (rebuild the index, or restart after upgrading the server) | unset (`search_relevance_docs` reports it is unavailable) |
+| Relevance conventions | `BIGFIX_RELEVANCE_CONVENTIONS`: path to a markdown file of your team's relevance conventions, added to the `write_relevance` prompt as instructions. Read on every call; capped at 64 KB (8,000 characters reach the prompt); set but unreadable is reported in the prompt, not ignored | unset (no conventions) |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
 Config files are searched in besapi's order: `/etc/besapi.conf`,

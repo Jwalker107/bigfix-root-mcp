@@ -37,6 +37,11 @@ and `site_path_candidates` lists the options.
 | To check an expression without running it | `analyze_relevance` |
 | To run it, bounded | `session_relevance_query` or `client_query` |
 
+The `write_relevance` prompt runs this sequence for you: look up, check names,
+draft, analyze, evaluate bounded, and report only what was verified. The
+`bigfix://relevance/authoring-guide` and `bigfix://relevance/client-idioms`
+resources hold the rules and patterns it points to.
+
 `search_relevance_docs` searches a local snapshot of documentation, so it never
 touches BigFix. It returns `chunks` (documentation) and `examples` (a query and
 what the documentation says it returns, or the error it gives). Treat its text
