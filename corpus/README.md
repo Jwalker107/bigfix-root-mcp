@@ -32,6 +32,7 @@ Measure and select, once the index is built:
 
     python -m tools.eval.analyze_examples     # offline analyzer pass over the examples
     python -m tools.eval.golden               # writes eval/golden.jsonl
+    python -m tools.eval.retrieval            # search mechanics (not a relevance score)
 
 The index is rebuilt, not migrated, when its schema version changes: a server
 that reads a different version says so and asks for a rebuild.

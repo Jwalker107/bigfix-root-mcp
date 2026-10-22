@@ -19,7 +19,7 @@ is reported.
 | 2. Convert and chunk | Done (real index built from the pinned developer.bigfix.com checkout) |
 | 3. Retrieval tool | Done (`search_relevance_docs`, read-only, tested against fixture and real index) |
 | 4. Workflow prompt and curated resources | Not started |
-| 5. Evaluation | In progress: analyzer pass over the examples done (see Phase 5a); live answer checks and retrieval scoring next |
+| 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22); next is Phase 5b, real questions with and without retrieval |
 | 6. Docs and CI | Not started |
 
 ## Decisions
@@ -379,9 +379,64 @@ examples; 1,170 parse and 34 do not (22 bare fences, 12 `qna`); 569 examples
 labelled by the analyzer (443 client, 126 session); 49 mention an inspector the
 analyzer lacks.
 
-Still to do in 5a: live answer checks of the golden set through the configured
-qna targets, and retrieval scoring (does the right chunk or example come back in
-the top 5).
+#### Phase 5a, step 3: retrieval mechanics (done 2026-10-22)
+
+`python -m tools.eval.retrieval [--index PATH]` (`tools/eval/retrieval.py`, tests
+in `tests/test_eval_retrieval.py`). It searches through
+`bigfix_root_mcp.knowledge`, read-only, in about 8 seconds, and checks mechanics.
+**It is not a relevance score**: every query is derived from the index itself, so
+a high score is expected and says nothing about whether a person's question is
+answered. That needs human-written questions (Phase 5b).
+
+On the index built from commit `89435d3` plus the two PDFs (5,825 chunks, 1,204
+examples), top-k is 5:
+
+| Check | First result | In top 5 | Not found |
+|---|---|---|---|
+| Find an example by its own text (1,204) | 86.0% | 98.5% | 18 |
+| Find a chunk by its own heading (5,789 distinct) | 82.1% | 97.4% | 152 |
+
+- **No tokenisation fault.** All 18 examples missing from the top 5 are found
+  within the top 25: they are ambiguity between similar examples, not
+  unfindable text. Punctuation is not searchable (`"foo" = "foo"` reduces to the
+  single word `foo`), so symbol-heavy relevance cannot be told apart by its
+  symbols.
+- **Ranking is weakest for generic headings.** Not ranked first: `type: X`
+  intro sections 30.5% (124 of 407), prose headings 31.5% (170 of 539),
+  inspector signatures 15.3% (743 of 4,843). A question like "what is an access
+  control entry" competes with every inspector whose heading contains those
+  words. A boost for an exact or leading heading match is the obvious candidate
+  fix; it should be tried against real questions, not these.
+- **Duplicate pages are real but small.** 32 chunk texts appear on more than one
+  page (57 redundant chunks of 5,825, about 1%). The biggest group is
+  `tutorial.md` = `tutorial/client/index.md` (11 chunks); the numeric reference
+  pages (`integer`, `floating-point`, `large-integer`, `uinteger`) share
+  several. 151 of the 5,789 heading searches (2.6%) return a list holding two
+  chunks with identical text. Collapsing identical texts in a result list, with
+  an `also_in` list of pages, would give those slots back; not done.
+
+#### Phase 5a, step 4: live answer checks (deferred by the user, 2026-10-22)
+
+Decision: skip for now; pick it up when a target is usable. The golden set
+(`python -m tools.eval.golden`, 1,031 examples) could not be checked live at the
+time of writing. What was available on this machine:
+
+| Target | Kind | State |
+|---|---|---|
+| `local` | local qna | **Unusable**: no qna binary ("no qna binary found; pass qna_path or install the BES client"); there is no BES client here |
+| `ubuntu-22-04-x86_64`, `ubi10-x86_64` | containers | **Unusable now**: the Docker client is installed but its daemon is not running |
+| `web-eval-rhel` | online evaluator | Usable, but it sends each query to developer.bigfix.com, an external service |
+
+The docs' own answers were produced on RHEL, so the online evaluator and the UBI
+container are the faithful environments; the Windows host is not (many examples
+read `/etc/...`). Options: start Docker Desktop and use the containers (first
+use downloads the agent artifact and builds an image; no traffic to
+developer.bigfix.com beyond that), or run the golden client examples (about
+900) through the online evaluator at a polite rate (roughly 1 request a
+second, 15 to 20 minutes). The package batches many expressions per run
+(`evaluate_many_stream`). Not built yet: how documented answers should be
+compared with qna output (formatting, tuples, ordering) depends on real output,
+so the comparison is best written against a first run.
 
 ### Phase 6: Docs and CI
 - README: the new tool, environment variables, how to build the index, the
