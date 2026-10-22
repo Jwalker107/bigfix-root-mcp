@@ -175,6 +175,13 @@ Build behaviour worth knowing:
   setting; `git ls-files --eol` is also checked).
 - Example text is never HTML-unescaped; prose is cleaned. Examples that repeat
   an earlier (dialect, query, answers, errors) are dropped and counted.
+- Template cleanup: `{% ... %}` tags are dropped and `{{ 'x' | linkType }}`
+  (the site's type-link filter, 35 uses in 6 files) becomes `x`. Anything else
+  with `{{` or `{%` left in indexed prose or headings is not guessed at; it is
+  counted and shown as `template-leftovers=N` per source in the build report, so
+  a new construct is visible at build time instead of in search results. Code
+  and examples are verbatim and not counted. The first index had 35 such
+  leftovers, found by a live search, because only `{% %}` had been checked.
 - Dialect and kind come from per-source rules in `build.SOURCE_RULES`.
   developer.bigfix.com: `guide/session` -> session, `guide/client` and
   `tutorial/client` -> client, the generated inspector reference

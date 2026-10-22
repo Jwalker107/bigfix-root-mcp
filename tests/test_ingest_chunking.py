@@ -172,6 +172,35 @@ class TestProse:
         parsed = parse("# bit &lt;integer&gt; of &lt;bit set&gt; : boolean\n\nReturns a bit.\n")
         assert parsed.chunks[0].heading == "bit <integer> of <bit set> : boolean"
 
+    @pytest.mark.parametrize(
+        "expression",
+        ["{{'file' | linkType}}", '{{ "file" | linkType }}', "{{ 'file'|linkType }}"],
+    )
+    def test_the_link_type_filter_renders_as_its_text(self, expression):
+        parsed = parse("# h\n\nIt defines a " + expression + " object.\n")
+        assert parsed.chunks[0].text == "It defines a file object."
+        assert parsed.leftover_templates == 0
+
+    def test_the_link_type_filter_works_in_headings_and_with_spaces_in_the_name(self):
+        parsed = parse("# the {{'bes computer' | linkType}} type\n\nBody.\n")
+        assert parsed.chunks[0].heading == "the bes computer type"
+        assert parsed.leftover_templates == 0
+
+    def test_template_syntax_inside_code_is_left_verbatim_and_not_counted(self):
+        parsed = parse("# h\n\n```\n{{'file' | linkType}}\n```\n")
+        assert "{{'file' | linkType}}" in parsed.chunks[0].text
+        assert parsed.leftover_templates == 0
+
+    def test_unrecognised_template_expressions_stay_visible_and_are_counted(self):
+        text = "# h\n\nUses {{ other('x') }} and {{ 'y' | upper }} here.\n"
+        parsed = parse(text)
+        assert "{{ other('x') }}" in parsed.chunks[0].text
+        assert "{{ 'y' | upper }}" in parsed.chunks[0].text  # only linkType is known
+        assert parsed.leftover_templates == 2
+
+    def test_a_clean_document_has_no_leftover_templates(self):
+        assert parse("# h\n\n{% note %}\nPlain.\n{% endnote %}\n").leftover_templates == 0
+
     def test_html_tags_are_removed_but_placeholders_survive(self):
         text = "# h\n\n<strong>Example</strong> of <user> and <bit set> and <integer> values.\n"
         assert parse(text).chunks[0].text == "Example of <user> and <bit set> and <integer> values."

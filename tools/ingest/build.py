@@ -130,6 +130,7 @@ class SourceReport:
     duplicate_examples: int = 0
     stub_sections: int = 0
     empty_sections: int = 0
+    leftover_templates: int = 0
     skipped_files: Counter = field(default_factory=Counter)
 
 
@@ -349,6 +350,7 @@ def build(
             )
             report.stub_sections += parsed.stub_skipped
             report.empty_sections += parsed.empty_skipped
+            report.leftover_templates += parsed.leftover_templates
             for chunk in parsed.chunks:
                 row = index.ChunkRow(
                     source_id=item.source.id,
@@ -399,6 +401,7 @@ def format_report(result: BuildResult, index_path: Path, *, dry_run: bool) -> st
                 f" files={report.files} chunks={report.chunks} examples={report.examples}"
                 f" duplicate-examples={report.duplicate_examples}"
                 f" stub-sections={report.stub_sections} empty-sections={report.empty_sections}"
+                f" template-leftovers={report.leftover_templates}"
             )
             lines.append(head + extra)
             if report.skipped_files:

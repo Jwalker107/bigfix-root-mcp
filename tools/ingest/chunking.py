@@ -46,6 +46,13 @@ _FIELD_RE = re.compile(r"^([QAIET]):(?:$| (.*)$|([^\s\\/].*)$)")
 _STUB_RE = re.compile(r"^no documentation exists\.?$", re.IGNORECASE)
 
 _TEMPLATE_RE = re.compile(r"\{%.*?%\}")
+# `{{ 'file' | linkType }}` renders as a link whose text is the quoted string
+# (site/build/lib/renderer.js), so the text is what a reader sees. It is the only
+# `{{ }}` form in the pinned docs; any other is left visible and counted, never
+# guessed at.
+_LINK_TYPE_RE = re.compile(r"\{\{\s*(['\"])(.+?)\1\s*\|\s*linkType\s*\}\}")
+# template syntax still present in prose after cleaning
+_LEFTOVER_TEMPLATE_RE = re.compile(r"\{\{|\{%")
 _IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _BLOCK_TAGS = "p|div|br|li|ol|ul|tr|table|dl|dt|dd|h[1-6]|hr|blockquote|pre|section"
@@ -94,6 +101,10 @@ class ParsedDocument:
     stub_skipped: int = 0
     # sections skipped because they had no body (a heading directly above another)
     empty_skipped: int = 0
+    # `{{` or `{%` still in the headings and prose that were indexed (code and
+    # examples are verbatim and not counted). Non-zero means a template construct
+    # the cleaner does not know, and it will show up in search results.
+    leftover_templates: int = 0
 
 
 @dataclass
@@ -129,6 +140,7 @@ def _tag_replacement(match: re.Match) -> str:
 
 def plain_text(text: str) -> str:
     """Turn a prose fragment into plain text for reading and search."""
+    text = _LINK_TYPE_RE.sub(r"\2", text)
     text = _TEMPLATE_RE.sub("", text)
     text = _HTML_TAG_RE.sub(_tag_replacement, text)
     text = _IMAGE_RE.sub(r"\1", text)
@@ -440,6 +452,11 @@ def parse_document(
         if _STUB_RE.match(body_text) and not any(b.kind == "code" for b in section.blocks):
             parsed.stub_skipped += 1
             continue
+        parsed.leftover_templates += len(_LEFTOVER_TEMPLATE_RE.findall(section.heading)) + sum(
+            len(_LEFTOVER_TEMPLATE_RE.findall(block.text))
+            for block in section.blocks
+            if block.kind == "para"
+        )
         for part in _pack(section.blocks, max_chars):
             parsed.chunks.append(
                 Chunk(

@@ -433,8 +433,20 @@ class TestModes:
         assert "ingested" in report
         assert "duplicate-examples=1" in report
         assert "stub-sections=1" in report
+        assert "template-leftovers=0" in report
         assert "files not indexed: .html=1, hidden=1" in report
         assert "index written to" in report
+
+    def test_unrecognised_template_syntax_is_counted_and_reported(self, tmp_path):
+        path = make_repo(tmp_path / "upstream")
+        commit = commit_files(path, {"pages/a.md": "# A\n\nUses {{ unknown | filter }} here.\n"})
+        row = git_row(path, commit, source_id=GIT_ID)
+        gitsource.sync_git_source(row, tmp_path / "raw", allow_schemes=("file",))
+        result = run(tmp_path, [row])
+        assert result.exit_code == build.EXIT_OK  # visible, not fatal
+        assert result.reports[0].leftover_templates == 1
+        report = build.format_report(result, tmp_path / "index" / "relevance.sqlite", dry_run=False)
+        assert "template-leftovers=1" in report
 
 
 class TestLabelling:
