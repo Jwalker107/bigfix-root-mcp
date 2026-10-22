@@ -1,0 +1,3 @@
+id,kind,location,branch,commit,subpath,notes
+team-fixlets,dir,<LOCAL_DIRECTORY_OF_BES_FILES>,,,,read in place; never modified
+team-repo,git,https://<HOST>/<ORG>/<REPO>.git,<BRANCH>,,<RELATIVE_SUBPATH>,blank commit = the branch tip when read; the commit is recorded

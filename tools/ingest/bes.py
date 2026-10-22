@@ -1,0 +1,175 @@
+"""Read the relevance out of BigFix .bes files.
+
+Shared by the question collector (tools/eval/questions.py) and the reference
+fixlet index, so there is one parser and one set of safety rules.
+
+  applicability  a Fixlet or Task: all its <Relevance> lines together decide which
+                 computers it applies to. One statement per line, role 'applicability'.
+  property       an Analysis <Property>: relevance that reports a value. One statement
+                 per property, role 'property', carrying the property's name.
+
+Safety, because these files may be confidential and are never trusted:
+
+  - the XML parser resolves no entities and loads no DTD or network resource, so a
+    hostile file cannot make this read anything else;
+  - nothing under the source directory is written or modified;
+  - a symbolic link or junction is never followed, for a file or a directory, so a
+    link cannot lead the walk outside the directory it was given;
+  - one file that is not valid XML is recorded and skipped, never fatal.
+
+Action scripts are not read here. Only relevance, title and description are.
+"""
+
+import hashlib
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from lxml import etree
+
+from tools.ingest import convert
+
+DESCRIPTION_CHARS = 600
+# directories that hold tooling or dependencies, never content worth reading
+SKIP_DIRS = frozenset({".git", "node_modules", "site-packages", "__pycache__", ".venv", "venv"})
+KINDS = ("Fixlet", "Task", "Analysis")
+EXTENSION = ".bes"
+
+
+@dataclass
+class Statement:
+    role: str  # 'applicability' or 'property'
+    relevance: str
+    name: str = ""  # a property's name
+
+
+@dataclass
+class Item:
+    kind: str  # Fixlet, Task or Analysis
+    title: str
+    description: str
+    path: str  # relative to the source directory, posix separators
+    statements: list[Statement] = field(default_factory=list)
+
+
+@dataclass
+class Extraction:
+    items: list[Item]
+    files: int = 0
+    unparsable: list[str] = field(default_factory=list)
+    duplicate_files: int = 0
+    duplicate_items: int = 0
+    # SHA-256 over every file read (relative path and content), so one tree always gives
+    # one value and any added, removed, renamed or edited file changes it
+    fingerprint: str = ""
+
+
+def _parser() -> etree.XMLParser:
+    # no entity expansion, no DTD, no network: a content file must never read anything else
+    return etree.XMLParser(
+        resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False, recover=False
+    )
+
+
+def _text(element: etree._Element | None) -> str:
+    if element is None:
+        return ""
+    return "".join(element.itertext()).strip()
+
+
+def _description(element: etree._Element | None) -> str:
+    """A description as plain text: it is often HTML, escaped or in a CDATA section."""
+    raw = _text(element)
+    if "<" in raw:
+        raw = convert.html_to_markdown(raw)
+    return re.sub(r"\s+", " ", raw).strip()[:DESCRIPTION_CHARS]
+
+
+def parse_bes(data: bytes, path: str) -> list[Item]:
+    """Read the items in one BES document. Raises etree.XMLSyntaxError if it is not XML."""
+    root = etree.fromstring(data, _parser())
+    items = []
+    for element in root:
+        kind = etree.QName(element).localname if isinstance(element.tag, str) else ""
+        if kind not in KINDS:
+            continue
+        item = Item(
+            kind=kind,
+            title=_text(element.find("Title")),
+            description=_description(element.find("Description")),
+            path=path,
+        )
+        item.statements = [
+            Statement("applicability", _text(relevance))
+            for relevance in element.findall("Relevance")
+            if _text(relevance)
+        ]
+        if kind == "Analysis":
+            item.statements += [
+                Statement("property", _text(prop), name=prop.get("Name", ""))
+                for prop in element.findall("Property")
+                if _text(prop)
+            ]
+        if item.statements:
+            items.append(item)
+    return items
+
+
+def _is_link(path: Path) -> bool:
+    """A symbolic link, or on Windows a junction, which is_symlink() does not report."""
+    return path.is_symlink() or getattr(os.path, "isjunction", lambda _p: False)(path)
+
+
+def bes_files(root: Path) -> list[Path]:
+    """Every .bes file under root, in any letter case (.BES too), in a stable order.
+
+    The order is by relative posix path, so one tree always gives one sequence on any
+    platform. Symbolic links and the directories in SKIP_DIRS are left alone.
+    """
+    found: list[tuple[str, Path]] = []
+    for directory, subdirs, names in os.walk(root, followlinks=False):
+        here = Path(directory)
+        # prune in place: os.walk does not descend into what is removed from subdirs
+        subdirs[:] = [d for d in subdirs if d not in SKIP_DIRS and not _is_link(here / d)]
+        for name in names:
+            path = here / name
+            if path.suffix.lower() == EXTENSION and not _is_link(path):
+                found.append((path.relative_to(root).as_posix(), path))
+    return [path for _, path in sorted(found, key=lambda pair: pair[0])]
+
+
+def extract(root: Path) -> Extraction:
+    """Read every .bes file under root; identical files and identical items count once."""
+    result = Extraction(items=[])
+    seen_files: set[str] = set()
+    seen_items: set[tuple] = set()
+    entries: list[str] = []
+    for path in bes_files(root):
+        relative = path.relative_to(root).as_posix()
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        result.files += 1
+        entries.append(f"{relative}\0{digest}\n")
+        if digest in seen_files:
+            result.duplicate_files += 1
+            continue
+        seen_files.add(digest)
+        try:
+            items = parse_bes(data, relative)
+        except etree.XMLSyntaxError:
+            result.unparsable.append(relative)
+            continue
+        for item in items:
+            key = (
+                item.kind,
+                item.title,
+                tuple((s.role, s.name, s.relevance) for s in item.statements),
+            )
+            if key in seen_items:
+                result.duplicate_items += 1
+                continue
+            seen_items.add(key)
+            result.items.append(item)
+    result.fingerprint = hashlib.sha256("".join(entries).encode("utf-8")).hexdigest()
+    return result

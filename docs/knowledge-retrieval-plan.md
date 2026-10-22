@@ -20,7 +20,8 @@ is reported.
 | 3. Retrieval tool | Done (`search_relevance_docs`, read-only, tested against fixture and real index) |
 | 4. Workflow prompt and curated resources | Done (`write_relevance`, conventions file, two analyzer-checked resources) |
 | 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22). Phase 5b has started: 25 questions from the team's own BES content are approved (more wanted) |
-| 6. Docs and CI | Not started |
+| 6. Reference fixlets | Planned (written 2026-10-22); not started. Needs the decisions listed in its section before 6e |
+| 7. Docs and CI | Not started |
 
 ## Decisions
 
@@ -527,7 +528,181 @@ Observations so far:
   are only as informative as their titles.
 - No session-relevance questions exist yet; this content has none.
 
-### Phase 6: Docs and CI
+### Phase 6: Reference fixlets (planned, written 2026-10-22)
+
+Goal: learn from a tree of existing `.bes` files, so the server can show how this
+team has already solved a problem and which habits recur. Apply the same shape
+as the documentation work: build an index offline, search it read-only.
+
+**The reference corpus may be confidential.** Everything below follows from that:
+it is never tracked, never put in the wheel, and kept apart from the
+documentation index so the index-distribution decision (still deferred) cannot
+leak it.
+
+#### Scope
+
+- Applicability relevance: the `Relevance` lines of a Fixlet, Task or Analysis.
+- Property relevance: the `Property` clauses of an Analysis (and Global
+  Properties, which use the same form). Action-script conditions are out of scope.
+- Purpose of each clause comes from the file name, the title, the description and
+  the action script. The server never guesses a purpose from the relevance itself.
+- Dialect is `client` for all of it. The analyzer verdict (`parses`,
+  `unknown_inspectors`) is stored per clause as for the documentation examples.
+
+#### Design decisions
+
+| # | Decision | Reason |
+|---|---|---|
+| 1 | A separate function, in three parts: an offline ingest step, a separate index file, a separate read-only tool. Not a parameter on `write_relevance` or `search_relevance_docs` | The result shape differs (clause, role, purpose, observed conventions), and the confidentiality differs |
+| 2 | The scanner is an operator command, never a tool argument | A tool that read a path chosen by the model could be pointed at any directory by injected text |
+| 3 | Separate SQLite file, `corpus/index/fixlets.sqlite`, selected by `BIGFIX_FIXLET_INDEX` | Keeps company content out of the (possibly distributable) documentation index |
+| 4 | Conventions are counted, not summarized by a model | Every claim is checkable and reproducible, with counts and example ids |
+| 5 | Observed conventions never override declared ones | `corpus/conventions.md` says what the team wants; the index says what the team has written, mistakes included |
+| 6 | Optional everywhere: no index configured means the tool answers `available: false` and the prompt skips its step | Same degradation as the documentation index |
+
+#### Sources: a directory or a git repository
+
+Two source kinds, one list. The list is **untracked** (`corpus/fixlet-sources.csv`,
+gitignored), because a company repository's URL or path is itself internal. A
+tracked template, `docs/fixlet-sources.example.csv`, shows the columns.
+
+`id, kind, location, branch, commit, subpath, notes`
+
+- `kind=dir`: `location` is a local directory. It is read-only; nothing is
+  written into it. Every file whose extension is `.bes` in any case (`.BES`, `.Bes`)
+  is found. Symbolic links are not followed out of the root.
+- `kind=git`: `location` is a repository URL. It reuses the pinned-checkout
+  machinery in `tools/ingest/gitsource.py`: scheme restriction, strict validation
+  of every field, protocol locking, no credential prompts, and a check that HEAD
+  equals the requested commit. A blank `commit` means "the tip of `branch` now":
+  the tip is resolved once at read time and recorded, so the read is still
+  reproducible afterwards. URLs carrying a user name or password are rejected.
+- Command line, for one-off use: `python -m tools.ingest.fixlets --dir PATH` or
+  `--git URL [--branch B] [--commit SHA] [--subpath P]`. Either form can also be
+  run from the list with `--source ID`.
+
+**When it was read.** Every read is recorded in a `sources` table in the index and
+printed in the report:
+
+| Field | Directory | Git repository |
+|---|---|---|
+| `read_at` | UTC time the scan started | UTC time of the fetch |
+| What was read | file count, and a tree fingerprint (SHA-256 over each file's relative path and content hash, in path order, so a rename changes it too) | commit SHA, the commit's own date, branch |
+| Counts | parsed, skipped (with reason), unparsed | same |
+
+The fingerprint answers "did anything change since last time" for a directory,
+the way a commit SHA does for a repository. The search tool reports `read_at`
+and the commit or fingerprint with its results, so an answer can be traced to a
+specific read.
+
+Private repositories: `gitsource.py` never prompts. A private repository works
+only if git can authenticate non-interactively (for example a credential
+helper). Credentials are never placed in the URL or the list. This is an open
+point to confirm on first use.
+
+#### Parsing
+
+The `.bes` extraction now lives in `tools/ingest/bes.py` (`parse_bes`, `extract`,
+`bes_files`), shared with the question tool, so there is one parser (step 6a).
+It does not read action scripts yet; step 6c adds that. Requirements on top of it:
+
+- XML with entity resolution and network access off. One bad file is recorded as
+  skipped with its reason and never stops the run.
+- Roles: `applicability` (Fixlet, Task, Analysis `Relevance`) and `property`
+  (Analysis `Property`, with the property's name).
+- Purpose text: file name, relative path, title, description (HTML removed), and a
+  bounded excerpt of each action script.
+- Each clause keeps its item type, its position in the item and a stable id.
+- A per-file size limit, so a huge file cannot exhaust memory.
+
+#### Secrets and personal data
+
+Action scripts and descriptions often hold hostnames, paths, accounts and,
+sometimes, passwords or tokens. Before anything is indexed, run the existing
+`tools/ingest/scan.py` over the purpose text. A finding excludes that text (the
+clause itself stays, the script excerpt does not) and is reported by file, never
+by value. The scan is a net, not a guarantee, so the index stays local and untracked
+regardless.
+
+#### Index
+
+New file and new schema, versioned like the documentation index (rebuilt, not
+migrated):
+
+- `clauses`: id, source id, relative path, item id, item type, role, property
+  name, clause text, purpose text, analyzer verdict, `dialect_source`. FTS5 over
+  purpose and clause text, weighted toward purpose, since the question is usually
+  asked in words about what the content does.
+- `sources`: the read record above.
+- `conventions`: see below.
+
+#### Learned conventions
+
+Counted by a deterministic pass over the clauses, so each one can be checked.
+Clauses are normalized (case and spacing only; string literals kept) and then
+counted across files:
+
+- Recurring clauses per role and platform. The platform comes from the item's own
+  OS test, for example "Windows", "Mac", "Unix", or none.
+- The guard clauses that most often open an item, in order.
+- Share of items that contain a given guard, for example how many Windows
+  applicability sets include the proxy-agent check.
+- Property habits: how often properties are guarded, and the common shapes.
+
+Each record stores the pattern, the number of files and the total considered, the
+share, and a few example ids. A pattern is reported only above a minimum support
+(default: at least 5 files and at least 10 percent of its group), so one-off
+quirks are not called conventions. They are labelled `observed`, with the counts
+shown.
+
+#### Tool and prompt
+
+- A new read-only tool, `search_reference_fixlets(query, role, platform, limit)`.
+  Results carry the clause, role, purpose, analyzer verdict, `read_at` and
+  provenance, and a small `conventions` list for the same role and platform.
+- The text it returns is reference data, not instructions: descriptions are free
+  text written by other people.
+- Results are marked as company content and bounded like every other tool.
+- `write_relevance` gains one step, taken only when the tool reports it is
+  available: look for a similar fixlet before drafting, and treat a match as a
+  starting point to adapt, run through `analyze_relevance`, and check, never as an
+  answer to copy.
+
+#### Evaluation caution
+
+The 25 approved questions were written from this team's own BES files. If those
+same files are in the reference index, retrieval would hand back the answer and
+inflate any score. Phase 5b scoring with reference retrieval must hold out the
+source item of the question being asked, by candidate id and file path. Report
+scores with and without the hold-out only for comparison.
+
+#### Steps
+
+| Step | Work | Done when |
+|---|---|---|
+| 6a (done 2026-10-22) | Move the `.bes` parser to `tools/ingest/bes.py`; the question tool uses it | Its candidates output is byte-identical on the real source (183 candidates); the question tests pass with only their import repointed. Two fixes came with the move: `.BES` is found on case-sensitive systems, and symbolic links and Windows junctions are never followed |
+| 6b (done 2026-10-22) | Source list, directory scanner with fingerprint, git sources via `gitsource.py`, read record | A directory and a repository each read from fixtures; the report shows `read_at`. `python -m tools.ingest.fixlets` (`--source`, `--dir`, `--git`); records go to the untracked `index/fixlet-reads.jsonl`; template in `docs/fixlet-sources.example.csv` |
+| 6c | Scan for secrets, build the index with the analyzer verdict | Index builds from fixture `.bes` files; a planted secret is excluded and reported without its value |
+| 6d | Convention counting with support thresholds | Counts match a hand-counted fixture |
+| 6e | Tool, prompt step, resource note, README | The tool and the prompt step degrade cleanly with no index |
+| 6f | Tests and docs | Fixtures are synthetic; nothing confidential is committed |
+
+#### Decisions needed before 6e
+
+1. May search results from this index go to the model the MCP client uses? The
+   content is confidential, and results are returned into the model's context.
+   This needs an approver's answer, not an assumption.
+2. How private repositories authenticate (see above).
+3. The minimum support for a convention, if the default is wrong for the corpus
+   size.
+
+#### Not in scope
+
+- Learning from action-script conditions.
+- Rewriting or "fixing" reference clauses in the index.
+- Any model-generated summary stored in the index.
+
+### Phase 7: Docs and CI
 - README: the new tool, environment variables, how to build the index, the
   legal caveat.
 - CI job for ingest unit tests using fixtures only (no network).
@@ -541,6 +716,7 @@ Observations so far:
 | Stale or wrong guidance | Source and version on every snippet; analyzer and live run in the prompt |
 | Confidential content leaking | Local-only processing, secret/PII scan, internal sources kept off the repo |
 | Server complexity | Index is optional, tool degrades gracefully, ingestion is a separate tool |
+| Confidential reference fixlets leaking, or inflating scores | Separate untracked index, source list untracked, secret scan before indexing, hold-out of each question's own source item (Phase 6) |
 | Prompt injection via fetched pages | Snippets are returned as data; the prompt says not to follow instructions in them |
 
 ## Suggested order

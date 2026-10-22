@@ -27,6 +27,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
@@ -47,6 +48,8 @@ _EOL_FIELDS = 3
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+# a branch name that cannot start with a dash or hold characters git treats specially
+_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -135,6 +138,52 @@ def head_commit(
 ) -> str:
     """HEAD of a checkout. Raises RuntimeError if it is not a usable git checkout."""
     return _git_out(["rev-parse", "HEAD"], checkout, allow_schemes=allow_schemes, runner=runner)
+
+
+def commit_date(
+    checkout: Path,
+    *,
+    allow_schemes: Collection[str] = DEFAULT_ALLOWED_SCHEMES,
+    runner: Runner = subprocess.run,
+) -> str:
+    """The committer date of HEAD as a strict ISO 8601 string (git's own record)."""
+    return _git_out(
+        ["show", "--no-patch", "--format=%cI", "HEAD"],
+        checkout,
+        allow_schemes=allow_schemes,
+        runner=runner,
+    )
+
+
+def resolve_tip(
+    repo_url: str,
+    branch: str,
+    *,
+    allow_schemes: Collection[str] = DEFAULT_ALLOWED_SCHEMES,
+    runner: Runner = subprocess.run,
+) -> str:
+    """The commit a branch (or, if blank, the remote's HEAD) points to right now.
+
+    Read-only: it asks the remote and fetches nothing. The url and branch are checked
+    before they reach a command line. Raises ValueError for a value that is not
+    acceptable, RuntimeError if the remote cannot be asked or has no such branch.
+    """
+    if not repo_url or repo_url.startswith("-") or any(ch.isspace() for ch in repo_url):
+        raise ValueError(f"invalid repo_url {repo_url!r}")
+    if branch and not _BRANCH_RE.match(branch):
+        raise ValueError(f"invalid branch {branch!r}")
+    ref = f"refs/heads/{branch}" if branch else "HEAD"
+    with tempfile.TemporaryDirectory() as scratch:
+        out = _git_out(
+            ["ls-remote", "--exit-code", repo_url, ref],
+            Path(scratch),
+            allow_schemes=allow_schemes,
+            runner=runner,
+        )
+    sha = out.split("\t", 1)[0].strip()
+    if not _COMMIT_RE.match(sha):
+        raise RuntimeError(f"could not resolve {ref!r} at the remote")
+    return sha
 
 
 def is_clean(

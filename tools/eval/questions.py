@@ -29,141 +29,17 @@ import argparse
 import hashlib
 import json
 import logging
-import re
 import sys
 from collections import Counter
-from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from lxml import etree
-
-from tools.ingest import convert, fetch, scan, verdict
+from tools.ingest import fetch, scan, verdict
+from tools.ingest.bes import Extraction, Item, Statement, extract
 
 log = logging.getLogger("corpus.eval")
 
 CANDIDATES_NAME = "candidates.jsonl"
-DESCRIPTION_CHARS = 600
-# directories that hold tooling or dependencies, never content worth reading
-SKIP_DIRS = frozenset({".git", "node_modules", "site-packages", "__pycache__", ".venv", "venv"})
-KINDS = ("Fixlet", "Task", "Analysis")
-
-
-@dataclass
-class Statement:
-    role: str  # 'applicability' or 'property'
-    relevance: str
-    name: str = ""  # a property's name
-
-
-@dataclass
-class Item:
-    kind: str  # Fixlet, Task or Analysis
-    title: str
-    description: str
-    path: str  # relative to the source directory, posix separators
-    statements: list[Statement] = field(default_factory=list)
-
-
-@dataclass
-class Extraction:
-    items: list[Item]
-    files: int = 0
-    unparsable: list[str] = field(default_factory=list)
-    duplicate_files: int = 0
-    duplicate_items: int = 0
-
-
-def _parser() -> etree.XMLParser:
-    # no entity expansion, no DTD, no network: a content file must never read anything else
-    return etree.XMLParser(
-        resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False, recover=False
-    )
-
-
-def _text(element: etree._Element | None) -> str:
-    if element is None:
-        return ""
-    return "".join(element.itertext()).strip()
-
-
-def _description(element: etree._Element | None) -> str:
-    """A description as plain text: it is often HTML, escaped or in a CDATA section."""
-    raw = _text(element)
-    if "<" in raw:
-        raw = convert.html_to_markdown(raw)
-    return re.sub(r"\s+", " ", raw).strip()[:DESCRIPTION_CHARS]
-
-
-def parse_bes(data: bytes, path: str) -> list[Item]:
-    """Read the items in one BES document. Raises etree.XMLSyntaxError if it is not XML."""
-    root = etree.fromstring(data, _parser())
-    items = []
-    for element in root:
-        kind = etree.QName(element).localname if isinstance(element.tag, str) else ""
-        if kind not in KINDS:
-            continue
-        item = Item(
-            kind=kind,
-            title=_text(element.find("Title")),
-            description=_description(element.find("Description")),
-            path=path,
-        )
-        item.statements = [
-            Statement("applicability", _text(relevance))
-            for relevance in element.findall("Relevance")
-            if _text(relevance)
-        ]
-        if kind == "Analysis":
-            item.statements += [
-                Statement("property", _text(prop), name=prop.get("Name", ""))
-                for prop in element.findall("Property")
-                if _text(prop)
-            ]
-        if item.statements:
-            items.append(item)
-    return items
-
-
-def _bes_files(root: Path) -> Iterator[Path]:
-    for path in sorted(root.rglob("*.bes"), key=lambda p: p.relative_to(root).as_posix()):
-        relative = path.relative_to(root)
-        if SKIP_DIRS.intersection(relative.parts) or path.is_symlink():
-            continue
-        yield path
-
-
-def extract(root: Path) -> Extraction:
-    """Read every .bes file under root; identical files and identical items count once."""
-    result = Extraction(items=[])
-    seen_files: set[str] = set()
-    seen_items: set[tuple] = set()
-    for path in _bes_files(root):
-        relative = path.relative_to(root).as_posix()
-        data = path.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        result.files += 1
-        if digest in seen_files:
-            result.duplicate_files += 1
-            continue
-        seen_files.add(digest)
-        try:
-            items = parse_bes(data, relative)
-        except etree.XMLSyntaxError:
-            result.unparsable.append(relative)
-            continue
-        for item in items:
-            key = (
-                item.kind,
-                item.title,
-                tuple((s.role, s.name, s.relevance) for s in item.statements),
-            )
-            if key in seen_items:
-                result.duplicate_items += 1
-                continue
-            seen_items.add(key)
-            result.items.append(item)
-    return result
 
 
 def _candidate_id(*parts: str) -> str:

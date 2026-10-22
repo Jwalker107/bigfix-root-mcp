@@ -6,6 +6,7 @@ import pytest
 from lxml import etree
 
 from tools.eval import questions as qs
+from tools.ingest import bes as bes_module
 
 # Fake credentials are assembled from fragments so no real-looking token sits in this file.
 AWS_KEY = "".join(("AK", "IA", "ABCDEFGHIJKLMNOP"))
@@ -50,7 +51,7 @@ ANALYSIS = (
 
 class TestParseBes:
     def test_a_fixlet_keeps_its_title_description_and_every_relevance_line(self):
-        (item,) = qs.parse_bes(bes(FIXLET), "a.bes")
+        (item,) = bes_module.parse_bes(bes(FIXLET), "a.bes")
         assert (item.kind, item.title, item.path) == ("Fixlet", "Install Foo", "a.bes")
         assert item.description == "Installs Foo on Windows."
         assert [(s.role, s.relevance) for s in item.statements] == [
@@ -59,11 +60,11 @@ class TestParseBes:
         ]
 
     def test_a_task_is_read_like_a_fixlet(self):
-        (item,) = qs.parse_bes(bes(TASK), "t.bes")
+        (item,) = bes_module.parse_bes(bes(TASK), "t.bes")
         assert (item.kind, item.description) == ("Task", "Plain text.")
 
     def test_an_analysis_has_applicability_and_named_properties(self):
-        (item,) = qs.parse_bes(bes(ANALYSIS), "x.bes")
+        (item,) = bes_module.parse_bes(bes(ANALYSIS), "x.bes")
         assert [(s.role, s.name) for s in item.statements] == [
             ("applicability", ""),
             ("property", "Foo Version"),
@@ -72,29 +73,29 @@ class TestParseBes:
         assert item.statements[1].relevance == 'version of file "c:\\foo.exe"'
 
     def test_action_scripts_are_never_read(self):
-        (item,) = qs.parse_bes(bes(FIXLET), "a.bes")
+        (item,) = bes_module.parse_bes(bes(FIXLET), "a.bes")
         assert all("run foo" not in s.relevance for s in item.statements)
         assert "run foo" not in item.description
 
     def test_other_elements_and_items_without_relevance_are_ignored(self):
         body = "<Baseline><Title>B</Title></Baseline><Fixlet><Title>None</Title></Fixlet>"
-        assert qs.parse_bes(bes(body), "b.bes") == []
+        assert bes_module.parse_bes(bes(body), "b.bes") == []
 
     def test_blank_relevance_elements_are_skipped(self):
         body = (
             "<Fixlet><Title>T</Title><Relevance>  </Relevance><Relevance>true</Relevance></Fixlet>"
         )
-        (item,) = qs.parse_bes(bes(body), "b.bes")
+        (item,) = bes_module.parse_bes(bes(body), "b.bes")
         assert [s.relevance for s in item.statements] == ["true"]
 
     def test_a_long_description_is_cut(self):
         body = fixlet(description="word " * 400)
-        (item,) = qs.parse_bes(bes(body), "b.bes")
-        assert len(item.description) <= qs.DESCRIPTION_CHARS
+        (item,) = bes_module.parse_bes(bes(body), "b.bes")
+        assert len(item.description) <= bes_module.DESCRIPTION_CHARS
 
     def test_xml_that_is_not_well_formed_raises(self):
         with pytest.raises(etree.XMLSyntaxError):
-            qs.parse_bes(b"<BES><Fixlet>", "bad.bes")
+            bes_module.parse_bes(b"<BES><Fixlet>", "bad.bes")
 
 
 class TestHostileXml:
@@ -107,7 +108,7 @@ class TestHostileXml:
             "<Relevance>true</Relevance></Fixlet></BES>"
         ).encode()
         try:
-            items = qs.parse_bes(doc, "x.bes")
+            items = bes_module.parse_bes(doc, "x.bes")
         except etree.XMLSyntaxError:
             items = []  # refusing the document is also safe
         assert all("TOP-SECRET-CONTENT" not in item.title for item in items)
@@ -121,7 +122,7 @@ class TestHostileXml:
             "<BES><Fixlet><Title>&c;</Title><Relevance>true</Relevance></Fixlet></BES>"
         ).encode("ascii")
         try:
-            items = qs.parse_bes(bomb, "x.bes")
+            items = bes_module.parse_bes(bomb, "x.bes")
         except etree.XMLSyntaxError:
             items = []
         assert all(len(item.title) < 100 for item in items)  # never expanded to 1000 characters
@@ -137,27 +138,27 @@ class TestExtract:
     def test_every_bes_file_under_the_source_is_read_in_a_stable_order(self, tmp_path):
         self.write(tmp_path, "b/two.bes", bes(TASK))
         self.write(tmp_path, "a/one.bes", bes(FIXLET))
-        extraction = qs.extract(tmp_path)
+        extraction = bes_module.extract(tmp_path)
         assert extraction.files == 2
         assert [i.path for i in extraction.items] == ["a/one.bes", "b/two.bes"]
 
     def test_a_byte_identical_copy_counts_once(self, tmp_path):
         self.write(tmp_path, "site/one.bes", bes(FIXLET))
         self.write(tmp_path, "site - Copy/one.bes", bes(FIXLET))
-        extraction = qs.extract(tmp_path)
+        extraction = bes_module.extract(tmp_path)
         assert (extraction.files, extraction.duplicate_files, len(extraction.items)) == (2, 1, 1)
 
     def test_the_same_item_in_different_bytes_counts_once(self, tmp_path):
         self.write(tmp_path, "one.bes", bes(FIXLET))
         self.write(tmp_path, "two.bes", bes(FIXLET) + b"\n")  # different bytes, same item
-        extraction = qs.extract(tmp_path)
+        extraction = bes_module.extract(tmp_path)
         assert (extraction.duplicate_files, extraction.duplicate_items) == (0, 1)
         assert len(extraction.items) == 1
 
     def test_an_unparsable_file_is_reported_not_fatal(self, tmp_path):
         self.write(tmp_path, "bad.bes", b"<BES><Fixlet>")
         self.write(tmp_path, "good.bes", bes(TASK))
-        extraction = qs.extract(tmp_path)
+        extraction = bes_module.extract(tmp_path)
         assert extraction.unparsable == ["bad.bes"]
         assert len(extraction.items) == 1
 
@@ -165,17 +166,17 @@ class TestExtract:
         self.write(tmp_path, ".git/x.bes", bes(TASK))
         self.write(tmp_path, ".venv/Lib/site-packages/y.bes", bes(TASK))
         self.write(tmp_path, "keep.bes", bes(FIXLET))
-        assert [i.path for i in qs.extract(tmp_path).items] == ["keep.bes"]
+        assert [i.path for i in bes_module.extract(tmp_path).items] == ["keep.bes"]
 
     def test_only_bes_files_are_read(self, tmp_path):
         self.write(tmp_path, "notes.xml", bes(FIXLET))
-        assert qs.extract(tmp_path).files == 0
+        assert bes_module.extract(tmp_path).files == 0
 
 
 class TestCandidates:
     def records(self, tmp_path, *bodies):
         (tmp_path / "x.bes").write_bytes(bes(*bodies))
-        records, stats = qs.candidates(qs.extract(tmp_path).items)
+        records, stats = qs.candidates(bes_module.extract(tmp_path).items)
         return records, stats
 
     def test_a_fixlet_gives_one_candidate_holding_all_its_relevance(self, tmp_path):
