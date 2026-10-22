@@ -153,6 +153,12 @@ activemq-data/
 besapi.conf
 .besapi.conf
 
+# Knowledge corpus: downloaded source material and derived artefacts are not
+# redistributed. Only corpus/MANIFEST.csv and corpus/README.md are tracked.
+corpus/raw/
+corpus/md/
+corpus/index/
+
 # Environments
 .env
 .envrc

@@ -67,6 +67,10 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pre-commit>=3.8",
+    # PDF text extraction for the corpus tooling (tools/ingest/convert.py). Dev
+    # only: the server never imports it, and the tooling skips PDF sources with a
+    # clear message when it is absent.
+    "pypdf>=6.20.1",
 ]
 
 # hatchling ships every file inside the package directory, so the MCP resource
