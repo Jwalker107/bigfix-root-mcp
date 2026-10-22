@@ -19,7 +19,7 @@ is reported.
 | 2. Convert and chunk | Done (real index built from the pinned developer.bigfix.com checkout) |
 | 3. Retrieval tool | Done (`search_relevance_docs`, read-only, tested against fixture and real index) |
 | 4. Workflow prompt and curated resources | Not started |
-| 5. Evaluation | Not started |
+| 5. Evaluation | In progress: analyzer pass over the examples done (see Phase 5a); live answer checks and retrieval scoring next |
 | 6. Docs and CI | Not started |
 
 ## Decisions
@@ -287,6 +287,65 @@ search. Add them only if Phase 5 shows a need.
 - Live checks run read-only against a non-production server.
 - Done when retrieval measurably improves the pass rate. If it does not,
   tune chunking before adding more material.
+
+#### Phase 5a, step 1: analyzer pass over the examples (done 2026-10-21)
+
+`python -m tools.eval.analyze_examples [--csv PATH]` (code in `tools/eval/`,
+tests in `tests/test_eval_analyze_examples.py`). Offline; reads the index
+read-only; a measurement, not a gate (exit 0 unless the index cannot be read).
+Analyzer: bigfix-relevance-analyzer 1.38.1. Index: commit `89435d3` plus the two
+PDFs (which contribute no examples).
+
+Result over 1,198 examples: **1,163 parse cleanly (97.1%)**, 35 do not (4 of
+those document an error themselves, 31 do not), 0 analyzer crashes.
+
+| Form | Parse cleanly | What it is |
+|---|---|---|
+| `qna` (Q:/A: blocks) | 1,075 / 1,087 (98.9%) | has documented answers |
+| `fence-qa` (Q:/A: in a fence) | 15 / 15 (100%) | has documented answers |
+| `fence-relevance` (bare fence) | 73 / 96 (**76.0%**) | a query with no answer |
+
+What it found:
+- **Bare `relevance` fences are unreliable, the Q:/A: forms are not.** 21 of
+  the 92 session-guide examples fail, all of them bare fences: 13 in
+  `guide/session/stataggregation.md`, plus typos such as an extra `)`
+  (`links (name of it & ... ")")) of bes computers`) and a stray `".` ending. An
+  example that does not parse is a bad model of syntax, so it should not be
+  presented as equal to a documented, answered one.
+- **The analyzer can label most of the `unknown`-dialect examples.** Of the 869
+  `unknown`-dialect examples that parse, 866 are classified definitively with no
+  disagreement between its two signals: 744 client, 125 session. That would make
+  the dialect filter useful for the inspector reference.
+- **Analyzer snapshot gaps, not doc errors.** 49 examples (34 distinct names)
+  use inspectors the analyzer does not know, mostly BigFix 11 additions: `idp
+  user` (14 examples), `idp groups` (8), `ips image`, `repository site flag`,
+  `fips_140_2 mode`. One name is a misspelling of `signal strength` in the source
+  docs themselves, so that one is a doc defect. This is
+  useful feedback for the analyzer's maintainers, and a reminder that an
+  `unknown-inspector` warning is not proof an inspector does not exist.
+- **Authoring artifacts in the source docs.** Four queries contain HTML entities
+  (`&lt;`, `&gt;=`) in `date.md` and `ipv4-address.md`; two fail to parse because
+  of it. An en dash stands in for a minus in `sets.md`; one tutorial example
+  (`(exists relay service) OR ()`) is a deliberate half-finished step; the
+  `json-value.md` examples use `<Example>` placeholders. None of these are
+  extraction errors; the text is kept verbatim.
+- **One extraction limit:** a bare fence is read as one query, but
+  `guide/basics/introspectors.md` has two blank-line-separated queries in one
+  fence. It is the only such case.
+- Lint findings are mostly style: `non-unique-risk` (79), `plural-preferred`
+  (52), `unknown-inspector` (50), `type-error` (9), `error-token` (5).
+
+Changes this suggests, none made yet:
+1. Store the analyzer verdict with each example in the index (parses or not,
+   unknown inspectors) and show it in `search_relevance_docs`, so an example
+   that does not parse is flagged instead of taught.
+2. Use the analyzer's classification to set the dialect of `unknown` examples.
+3. Define the golden set from `qna` and `fence-qa` examples that parse, have a
+   documented answer and are not `incomplete`; check their answers live next.
+4. Split a bare fence at blank lines (one example today).
+
+Still to do in 5a: live answer checks through the configured qna targets, and
+retrieval scoring (does the right chunk or example come back in the top 5).
 
 ### Phase 6: Docs and CI
 - README: the new tool, environment variables, how to build the index, the
