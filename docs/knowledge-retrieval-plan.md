@@ -19,7 +19,7 @@ is reported.
 | 2. Convert and chunk | Done (real index built from the pinned developer.bigfix.com checkout) |
 | 3. Retrieval tool | Done (`search_relevance_docs`, read-only, tested against fixture and real index) |
 | 4. Workflow prompt and curated resources | Not started |
-| 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22); next is Phase 5b, real questions with and without retrieval |
+| 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22). Phase 5b has started: 25 questions from the team's own BES content are approved (more wanted) |
 | 6. Docs and CI | Not started |
 
 ## Decisions
@@ -437,6 +437,69 @@ second, 15 to 20 minutes). The package batches many expressions per run
 (`evaluate_many_stream`). Not built yet: how documented answers should be
 compared with qna output (formatting, tuples, ordering) depends on real output,
 so the comparison is best written against a first run.
+
+#### Phase 5b, step 1: collecting real questions (started 2026-10-22)
+
+Goal: a set of questions people would really ask, each with a reference answer,
+so retrieval can be judged on relevance (what Phase 5a's mechanics checks cannot).
+
+Source: the team's own BES content (`c:\github\repository_sites`): 47 `.bes`
+files, 5 byte-identical copies skipped, 37 distinct Fixlet/Task/Analysis items,
+**183 candidates** (37 applicability, 146 analysis properties). All 183 parse
+cleanly with the analyzer, 3 mention an inspector it lacks, 0 held a secret.
+The content is all client relevance.
+
+Confidentiality (the rules, since this is company content in a fork of a public
+project): everything derived from it lives in the gitignored
+`corpus/eval/questions/` (`candidates.jsonl`, `questions.jsonl`, `review.md`);
+only the tooling is committed. The XML parser resolves no entities and loads no
+DTD or network resource (tested against external-entity and expansion attacks),
+action scripts are never read, every candidate is secret-scanned, and `summary`
+prints counts, never question text.
+
+Tooling (`tools/eval/questions.py`, tests in `tests/test_eval_questions*.py`):
+
+    python -m tools.eval.questions extract --source DIR   # .bes -> candidates.jsonl
+    python -m tools.eval.questions review                  # readable sheet: question beside its reference
+    python -m tools.eval.questions summary                 # counts and problems only
+    python -m tools.eval.questions update --id ID --status approved [--question TEXT]
+    python -m tools.eval.questions add --question TEXT --reference LINE [--reference LINE]
+
+Workflow: 25 draft questions were written from a spread of the candidates (10
+applicability, 15 property; 10 easy, 11 medium, 4 hard by estimate), phrased as
+the task and not in inspector words, so retrieval is not handed the answer. A
+person reviews them against their references, approves or rewrites, and adds
+questions of their own (`add`, which records its own reference and counts as
+approved). Statuses: draft, approved, rejected.
+
+Status (2026-10-22): all 25 drafts are approved by the user, with question 2
+replaced by the user's own wording. More questions, especially session
+relevance and tasks beyond hardware inventory, are still wanted (`add`).
+
+Conventions for expected answers (set by the user):
+- **Proxy agents are excluded by default.** Every applicability answer is expected
+  to exclude proxy agent contexts, using the team's guarded form, whether or not
+  the question says so. An answer that adds the check is correct even when the
+  reference lacks it (questions 3, 5 and 10 have no check in their reference).
+  Questions that already mention proxy agents (1, 2, 4, 6, 7, 8, 9, 23) do not
+  test the default, since they state it. It applies to applicability, not to
+  individual analysis properties. The Phase 4 prompt must carry this default.
+- The reference of question 9 spells the property `"proxy agent context"` (no
+  "in"): probably a typo in the source, so its guard never fires. Two items in
+  the team's content do this.
+
+Observations so far:
+- **Team conventions are not in the public docs.** Several items share the guard
+  `if exists property "in proxy agent context" then not in proxy agent context
+  else true`. A model that knows only the public documentation will write the
+  unguarded form, which is valid on newer clients. This is the clearest case for
+  adding the team's own content as a knowledge source.
+- **A reference is one valid answer, not the only one.** Scoring must therefore
+  accept equivalent relevance (analyzer parse and dialect, overlap of the
+  inspectors used, and a judge or a live comparison), not exact text. Not decided.
+- Some descriptions are placeholders (`<enter a description ...>`), so those items
+  are only as informative as their titles.
+- No session-relevance questions exist yet; this content has none.
 
 ### Phase 6: Docs and CI
 - README: the new tool, environment variables, how to build the index, the

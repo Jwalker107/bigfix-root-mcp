@@ -34,5 +34,11 @@ Measure and select, once the index is built:
     python -m tools.eval.golden               # writes eval/golden.jsonl
     python -m tools.eval.retrieval            # search mechanics (not a relevance score)
 
+Real questions (company content, so everything stays under `eval/questions/`):
+
+    python -m tools.eval.questions extract --source DIR   # .bes files -> candidates
+    python -m tools.eval.questions review                  # readable sheet to review
+    python -m tools.eval.questions summary                 # counts only
+
 The index is rebuilt, not migrated, when its schema version changes: a server
 that reads a different version says so and asks for a rebuild.
