@@ -92,6 +92,28 @@ authoring resources. Choices worth keeping:
   never `target_all` unless asked; and nothing is described as working unless it
   was run.
 
+## Reference fixlet search: company content, kept apart and bounded
+
+`search_reference_fixlets` reads a local index built from existing `.bes` files
+(`tools/ingest/fixlet*.py`, plan Phase 6). The content is the team's own, so:
+
+- **A separate index file and its own variable**, never merged into the
+  documentation index. The documentation index may one day be distributed; this
+  one is never, and the file says so in its meta table.
+- **The scan path is an operator command, not a tool argument.** A tool that read a
+  directory a model chose could be pointed anywhere by injected text.
+- **Groups are counted on their own.** A public repository must not be reported as a
+  team's habits, so conventions are per group and the response lists the groups.
+  Counted conventions are observations of what was written, mistakes included; a rule
+  the user or `BIGFIX_RELEVANCE_CONVENTIONS` states outranks them.
+- **Every result names its source and read time**, so an answer traces to one read.
+  A source's own location (a local path or an internal URL) is never returned.
+- **The hold-out is an environment variable, not an argument**, and a malformed one
+  makes the index unavailable instead of being ignored: an evaluation that silently
+  stopped holding out would score the index on its own answers.
+- **Returning results to the model was confirmed by the user (2026-10-22).** The
+  content goes into the context of whatever model the MCP client uses.
+
 ## Which writes, and why only these
 
 Three write tools exist: `stop_action`, `set_dashboard_variable`,

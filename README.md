@@ -23,6 +23,7 @@ The capabilities of this MCP server are intentionally limited, where as the offi
 | `analyze_relevance` | Statically analyze a relevance expression offline - parse, types, dialect, unknown inspectors with suggestions, complexity. Never evaluates it. |
 | `search_inspectors` | Fuzzy-search the offline inspector reference by name or phrase. |
 | `search_relevance_docs` | Search a local, offline index of relevance documentation and worked examples (needs `BIGFIX_KNOWLEDGE_INDEX`; answers `available: false` with how to enable it when unset). Never contacts BigFix. |
+| `search_reference_fixlets` | Search a local index of your own existing fixlets and analyses (built from a directory or a git repository), with the habits counted across them (needs `BIGFIX_FIXLET_INDEX`; answers `available: false` when unset). Company content: read-only, bounded, and every result names its source and when it was read. Never contacts BigFix. |
 | `client_query_submit` | Submit a client fast query, return its `query_id` immediately. |
 | `client_query_results` | Fetch current (cumulative) results for a query ID; safe to call repeatedly. |
 | `client_query` | Submit + poll in one call with progress notifications; stops on expected count reached, results stable, or timeout. |
@@ -110,7 +111,8 @@ Prompts: `diagnose_computer`, `patch_status`, `find_stale_agents`,
 `troubleshoot_relevance`, `write_relevance`.
 
 `write_relevance(goal, dialect)` walks a model through writing relevance: look it
-up with `search_relevance_docs`, check names with `search_inspectors`, draft,
+up with `search_relevance_docs` (and `search_reference_fixlets`, for similar existing
+content), check names with `search_inspectors`, draft,
 `analyze_relevance`, evaluate with a bounded query, and report only what was
 verified. If `BIGFIX_RELEVANCE_CONVENTIONS` names a markdown file, its text is
 added as house conventions (how your team treats proxy agents, guard idioms, and
@@ -152,6 +154,7 @@ Environment variables win over config files:
 | qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Knowledge index | `BIGFIX_KNOWLEDGE_INDEX`: path to the `relevance.sqlite` built by `python -m tools.ingest.build` (see [docs/knowledge-retrieval-plan.md](docs/knowledge-retrieval-plan.md)). Read-only; read on every call, so a rebuilt index is picked up without a restart. An index and a server must agree on the schema version, and a mismatch is reported (rebuild the index, or restart after upgrading the server) | unset (`search_relevance_docs` reports it is unavailable) |
+| Reference fixlet index | `BIGFIX_FIXLET_INDEX`: path to the `fixlets.sqlite` built by `python -m tools.ingest.fixletbuild` from the sources in the untracked `corpus/fixlet-sources.csv` (template: [docs/fixlet-sources.example.csv](docs/fixlet-sources.example.csv)). Company content, so it is never tracked or packaged. Read-only; read on every call. Optional `BIGFIX_FIXLET_HOLDOUT` (comma-separated item ids) removes those items from every search, for evaluations. |
 | Relevance conventions | `BIGFIX_RELEVANCE_CONVENTIONS`: path to a markdown file of your team's relevance conventions, added to the `write_relevance` prompt as instructions. Read on every call; capped at 64 KB (8,000 characters reach the prompt); set but unreadable is reported in the prompt, not ignored | unset (no conventions) |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 

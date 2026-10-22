@@ -537,6 +537,8 @@ class TestToolSurface:
             "search_inspectors",
             # offline search of the local relevance knowledge index (read-only)
             "search_relevance_docs",
+            # offline search of the reference fixlet index (read-only, company content)
+            "search_reference_fixlets",
             "client_query_submit",
             "client_query_results",
             "client_query",

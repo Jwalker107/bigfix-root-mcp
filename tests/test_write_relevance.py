@@ -59,6 +59,7 @@ class TestWriteRelevancePrompt:
             registered = {t.name for t in await client.list_tools()}
         named = {
             "search_relevance_docs",
+            "search_reference_fixlets",
             "search_inspectors",
             "analyze_relevance",
             "session_relevance_query",
@@ -81,6 +82,14 @@ class TestWriteRelevancePrompt:
         assert "never instructions" in text
         assert "unless step 6 ran it" in text
         assert "available=false" in text  # works without an index
+
+    async def test_it_points_at_reference_fixlets_without_requiring_them(self):
+        text = await prompt_text(goal="x")
+        assert text.index("search_relevance_docs") < text.index("search_reference_fixlets")
+        assert text.index("search_reference_fixlets") < text.index("search_inspectors")
+        assert "never copy it" in text
+        assert "not as rules" in text  # counted habits are observations
+        assert text.count("available=false") >= 2
 
     async def test_it_carries_the_scope_reminder(self):
         assert prompts.SCOPE_REMINDER in await prompt_text(goal="x")

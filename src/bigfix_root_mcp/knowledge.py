@@ -116,11 +116,11 @@ def parse_query(query: str) -> list[list[str]]:
     return terms
 
 
-def _fts_expression(terms: list[list[str]], joiner: str) -> str:
+def fts_expression(terms: list[list[str]], joiner: str) -> str:
     return joiner.join('"' + " ".join(term) + '"' for term in terms)
 
 
-def _clip(text: str, limit: int) -> tuple[str, bool]:
+def clip(text: str, limit: int) -> tuple[str, bool]:
     if len(text) <= limit:
         return text, False
     return text[:limit].rstrip() + " ...", True
@@ -172,7 +172,7 @@ def _open_index() -> tuple[sqlite3.Connection | None, dict | None]:
     return connection, None
 
 
-def _run(
+def run_match(
     connection: sqlite3.Connection,
     sql: str,
     terms: list[list[str]],
@@ -187,7 +187,7 @@ def _run(
         modes.append(("any_terms", " OR "))
     for mode, joiner in modes:
         rows = connection.execute(
-            statement, (_fts_expression(terms, joiner), *extra_params, limit)
+            statement, (fts_expression(terms, joiner), *extra_params, limit)
         ).fetchall()
         if rows:
             return rows, mode
@@ -195,7 +195,7 @@ def _run(
 
 
 def _chunk_result(row: sqlite3.Row) -> dict:
-    text, cut = _clip(row["text"], CHUNK_TEXT_CHARS)
+    text, cut = clip(row["text"], CHUNK_TEXT_CHARS)
     out = {
         "kind": row["kind"],
         "heading": row["heading"],
@@ -217,14 +217,14 @@ def _example_result(row: sqlite3.Row) -> dict:
     out = {
         "kind": "example",
         "query": row["query"],
-        "answers": [_clip(answer, MAX_ANSWER_CHARS)[0] for answer in answers[:MAX_ANSWERS]],
+        "answers": [clip(answer, MAX_ANSWER_CHARS)[0] for answer in answers[:MAX_ANSWERS]],
         "errors": json.loads(row["errors"]),
         "form": row["form"],
         "source": row["source_id"],
         "path": row["path"],
         "section_path": row["section_path"],
         "dialect": row["dialect"],
-        "context": _clip(row["context"], CONTEXT_CHARS)[0],
+        "context": clip(row["context"], CONTEXT_CHARS)[0],
     }
     if len(answers) > MAX_ANSWERS:
         out["answers_total"] = len(answers)
@@ -316,13 +316,13 @@ def search(
         cited: set[str] = set()
         if parsed_kind != "example":
             where, params = _filters("c", parsed_dialect, parsed_kind)
-            rows, mode = _run(connection, _CHUNK_SQL, terms, where, params, limit)
+            rows, mode = run_match(connection, _CHUNK_SQL, terms, where, params, limit)
             out["chunks"] = [_chunk_result(row) for row in rows]
             out["match"]["chunks"] = mode
             cited.update(row["source_id"] for row in rows)
         if parsed_kind in (None, "example"):
             where, params = _filters("e", parsed_dialect, None)
-            rows, mode = _run(connection, _EXAMPLE_SQL, terms, where, params, limit)
+            rows, mode = run_match(connection, _EXAMPLE_SQL, terms, where, params, limit)
             out["examples"] = [_example_result(row) for row in rows]
             out["match"]["examples"] = mode
             cited.update(row["source_id"] for row in rows)

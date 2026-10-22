@@ -684,7 +684,7 @@ scores with and without the hold-out only for comparison.
 | 6b (done 2026-10-22) | Source list, directory scanner with fingerprint, git sources via `gitsource.py`, read record | A directory and a repository each read from fixtures; the report shows `read_at`. `python -m tools.ingest.fixlets` (`--source`, `--dir`, `--git`); records go to the untracked `index/fixlet-reads.jsonl`; template in `docs/fixlet-sources.example.csv` |
 | 6c (done 2026-10-22) | Scan for secrets, build the index with the analyzer verdict | `python -m tools.ingest.fixletbuild` (`--all`, `--source`, `--dir`, `--git`, `--dry-run`) writes `corpus/index/fixlets.sqlite` (schema v1, `tools/ingest/fixletindex.py`). A planted secret is left out and reported by file, field and rule, never by value. On the real tree: 183 clauses (37 applicability, 146 property), all parse, 3 mention an inspector the analyzer lacks, 18 carry an action-script excerpt, nothing blocked. Platform and conventions columns arrive with 6d, so this schema is provisional until then |
 | 6d (done 2026-10-22) | Convention counting with support thresholds | `tools/ingest/fixletconventions.py`; index schema v2 adds `source_group`, `platform` and a `conventions` table. Counted per group, role and platform (plus `all`), as line, `and`-part (conjunct), opening line and shape, with files, total, share and example ids. Support: 5 items and, per role, 10 percent (applicability) or 1 percent (property, which varies far more). The real index has 107 conventions. Team applicability: the proxy-agent guard is in 344 of 509 sets (67.6 percent), alone or joined to a platform test with `and` |
-| 6e | Tool, prompt step, resource note, README | The tool and the prompt step degrade cleanly with no index |
+| 6e (done 2026-10-22) | Tool, prompt step, resource note, README | `search_reference_fixlets` (`src/bigfix_root_mcp/reference.py`) reads `BIGFIX_FIXLET_INDEX`; results carry group, source and read time, collapse copies within a group, and come with that group's counted conventions. `BIGFIX_FIXLET_HOLDOUT` removes items for evaluations and fails closed when malformed. `write_relevance` step 2 uses it when available. Approval to return results to the model was given by the user (2026-10-22) |
 | 6f | Tests and docs | Fixtures are synthetic; nothing confidential is committed |
 
 #### First real build (2026-10-22)
@@ -704,14 +704,16 @@ Grouping, confirmed by the user 2026-10-22: `repository-sites` and `custom-site-
 6d reports conventions for each group on its own, and the search tool labels which
 group a result came from. The source list gets a `group` column for this in 6d.
 
-#### Decisions needed before 6e
+#### Decisions that were needed before 6e (answered)
 
-1. May search results from this index go to the model the MCP client uses? The
-   content is confidential, and results are returned into the model's context.
-   This needs an approver's answer, not an assumption.
-2. How private repositories authenticate (see above).
-3. The minimum support for a convention, if the default is wrong for the corpus
-   size.
+1. May search results from this index go to the model the MCP client uses?
+   **Yes, confirmed by the user (2026-10-22).** The content goes into the context of
+   whatever model the client uses.
+2. How private repositories authenticate: still open. `gitsource.py` never prompts, so
+   a private repository works only if git can sign in without prompting; no private
+   repository has been read yet.
+3. The minimum support for a convention: answered by measurement, 5 items and 10
+   percent for applicability, 1 percent for properties (6d).
 
 #### Not in scope
 
