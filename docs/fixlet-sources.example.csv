@@ -1,3 +1,4 @@
-id,kind,location,branch,commit,subpath,notes
-team-fixlets,dir,<LOCAL_DIRECTORY_OF_BES_FILES>,,,,read in place; never modified
-team-repo,git,https://<HOST>/<ORG>/<REPO>.git,<BRANCH>,,<RELATIVE_SUBPATH>,blank commit = the branch tip when read; the commit is recorded
+id,kind,location,branch,commit,subpath,group,notes
+team-fixlets,dir,<LOCAL_DIRECTORY_OF_BES_FILES>,,,,team,read in place; never modified
+team-repo,git,https://<HOST>/<ORG>/<REPO>.git,<BRANCH>,,<RELATIVE_SUBPATH>,team,blank commit = the branch tip when read; the commit is recorded
+public-repo,git,https://<HOST>/<ORG>/<PUBLIC_REPO>.git,,,,reference,a different group is counted on its own; blank group = the source alone

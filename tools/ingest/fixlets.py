@@ -52,7 +52,7 @@ from tools.ingest import bes, fetch, gitsource
 log = logging.getLogger("corpus.fixlets")
 
 SOURCES_PATH = fetch.REPO_CORPUS / "fixlet-sources.csv"
-COLUMNS = ("id", "kind", "location", "branch", "commit", "subpath", "notes")
+COLUMNS = ("id", "kind", "location", "branch", "commit", "subpath", "group", "notes")
 REQUIRED_COLUMNS = ("id", "kind", "location")
 KINDS = ("dir", "git")
 READS_NAME = "fixlet-reads.jsonl"
@@ -84,6 +84,11 @@ def validate_row(row: dict[str, str], label: str = "source") -> None:
     location = row.get("location", "")
     if not location:
         raise ValueError(f"{label} {source_id}: location is empty")
+    group = row.get("group", "")
+    if group and not _ID_RE.match(group):
+        raise ValueError(
+            f"{label} {source_id}: invalid group {group!r} (use letters, digits, . _ -)"
+        )
     subpath = row.get("subpath", "")
     parts = subpath.replace("\\", "/").split("/")
     if subpath and (
@@ -132,6 +137,7 @@ def adhoc_row(
     branch: str = "",
     commit: str = "",
     subpath: str = "",
+    group: str = "",
 ) -> dict[str, str]:
     """A source row for a one-off command line, with an id derived from its location."""
     location = directory if directory is not None else repo or ""
@@ -147,6 +153,7 @@ def adhoc_row(
         "branch": branch,
         "commit": commit,
         "subpath": subpath,
+        "group": group,
         "notes": "",
     }
 
@@ -181,6 +188,8 @@ def _record(row: dict[str, str], when: str, extraction: bes.Extraction, **extra:
         "kind": row["kind"],
         "location": row["location"],
         "subpath": row["subpath"],
+        # sources in one group are counted together; a source without one stands alone
+        "group": row.get("group") or row["id"],
         "read_at": when,
         "tree_sha256": extraction.fingerprint,
         "files": extraction.files,

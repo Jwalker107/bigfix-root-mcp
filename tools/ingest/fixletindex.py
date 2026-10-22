@@ -4,13 +4,14 @@ This is company content, so it is kept apart from the documentation index
 (relevance.sqlite): a separate file, never tracked, never packaged, never meant to be
 distributed. The file says so in its own meta table.
 
-Schema version 1:
+Schema version 2:
 
   meta     key/value: schema_version, built_at (UTC), sqlite_version, counts,
            analyzer_version, and `confidential`.
   reads    one row per source read: its kind (dir or git), location, the commit and
            commit date (git), the UTC time it was read, a fingerprint of the files, and
-           counts. This is how a result is traced to one specific read.
+           counts. This is how a result is traced to one specific read. `source_group`
+           says which sources are counted together; one without a group is its own.
   clauses  one row per piece of relevance worth finding:
              applicability  a Fixlet or Task: all its relevance lines together, as a
                             JSON array in `relevance` (exact lines), and joined by
@@ -22,7 +23,14 @@ Schema version 1:
            unknown_inspectors) and `excluded`: a JSON array naming any purpose field
            that was left out because the secret scan found a credential in it.
            `content_id` is the same id the question collector gives an item, so a
-           question's own source can be held out of an evaluation.
+           question's own source can be held out of an evaluation. `platform` is
+           windows, mac, unix, multi or none, from the item's own operating-system test.
+  conventions
+           counted habits per (source_group, role, platform): a line, a top-level
+           `and` part of a line (conjunct), an opening line or a line's shape, with
+           how many distinct items hold it, how many there were, the share and a few
+           example content ids. `platform` 'all' rolls a group's platforms together.
+           Groups are never pooled. See fixletconventions.py.
   clauses_fts
            external-content FTS5 over title, file_name, description, action_excerpt,
            property_name and relevance_text (porter stemming over unicode61).
@@ -41,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 ROLES = ("applicability", "property")
 DIALECTS = ("session", "client", "both", "unknown")
@@ -52,6 +60,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE reads (
     source_id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK (kind IN ('dir', 'git')),
+    source_group TEXT NOT NULL,
     location TEXT NOT NULL,
     branch TEXT NOT NULL,
     commit_sha TEXT NOT NULL,
@@ -72,6 +81,7 @@ CREATE TABLE clauses (
     content_id TEXT NOT NULL,
     item_kind TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('applicability', 'property')),
+    platform TEXT NOT NULL,
     property_name TEXT NOT NULL,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
@@ -84,7 +94,21 @@ CREATE TABLE clauses (
     unknown_inspectors TEXT NOT NULL,
     excluded TEXT NOT NULL
 );
+CREATE TABLE conventions (
+    id INTEGER PRIMARY KEY,
+    source_group TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('applicability', 'property')),
+    platform TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('line', 'conjunct', 'opening', 'shape')),
+    pattern TEXT NOT NULL,
+    files INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    share REAL NOT NULL,
+    examples TEXT NOT NULL
+);
 CREATE INDEX clauses_by_source ON clauses(source_id);
+CREATE INDEX clauses_by_platform ON clauses(role, platform);
+CREATE INDEX conventions_by_cell ON conventions(source_group, role, platform);
 CREATE INDEX clauses_by_content ON clauses(content_id);
 CREATE VIRTUAL TABLE clauses_fts USING fts5(
     title, file_name, description, action_excerpt, property_name, relevance_text,
@@ -100,6 +124,7 @@ class ReadRow:
     location: str
     read_at: str
     tree_sha256: str
+    source_group: str = ""
     branch: str = ""
     commit_sha: str = ""
     commit_date: str = ""
@@ -123,6 +148,7 @@ class ClauseRow:
     description: str
     action_excerpt: str
     relevance: tuple[str, ...]
+    platform: str = "none"
     dialect: str = "client"
     # the analyzer's verdict; None means it was not analysed
     parses: bool | None = None
@@ -132,11 +158,28 @@ class ClauseRow:
     excluded: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ConventionRow:
+    source_group: str
+    role: str
+    platform: str
+    kind: str
+    pattern: str
+    files: int
+    total: int
+    share: float
+    examples: tuple[str, ...] = ()
+
+
 @dataclass
 class FixletIndexData:
     reads: list[ReadRow] = field(default_factory=list)
     clauses: list[ClauseRow] = field(default_factory=list)
+    conventions: list[ConventionRow] = field(default_factory=list)
     analyzer_version: str = ""
+    # the support thresholds the conventions were counted with, recorded in meta
+    min_files: int = 0
+    min_share: dict[str, float] = field(default_factory=dict)
 
 
 def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None = None) -> None:
@@ -154,11 +197,12 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
     try:
         connection.executescript(_SCHEMA)
         connection.executemany(
-            "INSERT INTO reads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO reads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     r.source_id,
                     r.kind,
+                    r.source_group,
                     r.location,
                     r.branch,
                     r.commit_sha,
@@ -176,9 +220,9 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
         )
         connection.executemany(
             "INSERT INTO clauses (source_id, path, file_name, content_id, item_kind, role,"
-            " property_name, title, description, action_excerpt, relevance, relevance_text,"
-            " dialect, parses, parse_error, unknown_inspectors, excluded)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " platform, property_name, title, description, action_excerpt, relevance,"
+            " relevance_text, dialect, parses, parse_error, unknown_inspectors, excluded)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     c.source_id,
@@ -187,6 +231,7 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
                     c.content_id,
                     c.item_kind,
                     c.role,
+                    c.platform,
                     c.property_name,
                     c.title,
                     c.description,
@@ -203,6 +248,24 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
             ],
         )
         connection.execute("INSERT INTO clauses_fts(clauses_fts) VALUES ('rebuild')")
+        connection.executemany(
+            "INSERT INTO conventions (source_group, role, platform, kind, pattern, files,"
+            " total, share, examples) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    v.source_group,
+                    v.role,
+                    v.platform,
+                    v.kind,
+                    v.pattern,
+                    v.files,
+                    v.total,
+                    v.share,
+                    json.dumps(v.examples),
+                )
+                for v in data.conventions
+            ],
+        )
         when = (built_at or datetime.now(UTC)).replace(microsecond=0).isoformat()
         meta = [
             ("schema_version", str(SCHEMA_VERSION)),
@@ -210,6 +273,9 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
             ("sqlite_version", sqlite3.sqlite_version),
             ("read_count", str(len(data.reads))),
             ("clause_count", str(len(data.clauses))),
+            ("convention_count", str(len(data.conventions))),
+            ("convention_min_files", str(data.min_files)),
+            ("convention_min_share", json.dumps(data.min_share, sort_keys=True)),
             ("confidential", CONFIDENTIAL_NOTE),
         ]
         if data.analyzer_version:

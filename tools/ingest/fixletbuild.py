@@ -37,7 +37,16 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from tools.ingest import bes, fetch, fixletindex, fixlets, gitsource, scan, verdict
+from tools.ingest import (
+    bes,
+    fetch,
+    fixletconventions,
+    fixletindex,
+    fixlets,
+    gitsource,
+    scan,
+    verdict,
+)
 
 log = logging.getLogger("corpus.fixletbuild")
 
@@ -104,8 +113,13 @@ def _clause(
     source_id: str,
     allowed: set[tuple[str, str, str]],
     result: Assembled,
+    item_platform: str,
 ) -> fixletindex.ClauseRow | None:
     lines = tuple(s.relevance for s in statements)
+    # a property with no operating-system test of its own takes its analysis's
+    platform = fixletconventions.platform_of(lines)
+    if platform == fixletconventions.PLATFORM_NONE:
+        platform = item_platform
     name = statements[0].name if role == "property" else ""
     purpose = {
         "title": item.title,
@@ -145,6 +159,7 @@ def _clause(
         description=purpose["description"],
         action_excerpt=purpose["action"],
         relevance=lines,
+        platform=platform,
         parses=failed is None,
         parse_error=(failed.parse_error or failed.crashed)[:PARSE_ERROR_CHARS] if failed else "",
         unknown_inspectors=tuple(sorted({n for v in verdicts for n in v.unknown_inspectors})),
@@ -153,13 +168,22 @@ def _clause(
 
 
 def assemble(
-    reads: Iterable[fixlets.Read], allowed: set[tuple[str, str, str]] | None = None
+    reads: Iterable[fixlets.Read],
+    allowed: set[tuple[str, str, str]] | None = None,
+    *,
+    min_files: int = fixletconventions.MIN_FILES,
+    min_share: float | None = None,
 ) -> Assembled:
     """Turn what was read into index rows, scanning every field first."""
     allowed = allowed or set()
     result = Assembled(
-        data=fixletindex.FixletIndexData(analyzer_version=verdict.analyzer_version())
+        data=fixletindex.FixletIndexData(
+            analyzer_version=verdict.analyzer_version(),
+            min_files=min_files,
+            min_share=fixletconventions.resolve_min_share(min_share),
+        )
     )
+    groups: dict[str, str] = {}
     for read in reads:
         if read.extraction is None:
             continue
@@ -168,6 +192,7 @@ def assemble(
             fixletindex.ReadRow(
                 source_id=record["source_id"],
                 kind=record["kind"],
+                source_group=record["group"],
                 location=record["location"],
                 read_at=record["read_at"],
                 tree_sha256=record["tree_sha256"],
@@ -181,11 +206,19 @@ def assemble(
                 items=record["items"],
             )
         )
+        groups[record["source_id"]] = record["group"]
         for item in read.extraction.items:
+            applicability = [s.relevance for s in item.statements if s.role == "applicability"]
+            item_platform = fixletconventions.platform_of(applicability)
             for role, statements in _groups(item):
-                clause = _clause(item, role, statements, record["source_id"], allowed, result)
+                clause = _clause(
+                    item, role, statements, record["source_id"], allowed, result, item_platform
+                )
                 if clause is not None:
                     result.data.clauses.append(clause)
+    result.data.conventions = fixletconventions.mine(
+        result.data.clauses, groups, min_files=min_files, min_share=min_share
+    )
     return result
 
 
@@ -212,6 +245,28 @@ def format_report(built: Assembled) -> str:
     return "\n".join(lines) + "\n"
 
 
+# the pattern kind that says most about each role: guards for applicability, shapes for properties
+SHOWN_KIND = {"applicability": "conjunct", "property": "shape"}
+
+
+def format_conventions(data: fixletindex.FixletIndexData, top: int) -> str:
+    """The most common patterns per group and role, across all platforms."""
+    lines = []
+    for group in sorted({c.source_group for c in data.conventions}):
+        for role in fixletindex.ROLES:
+            cell = [
+                c
+                for c in data.conventions
+                if (c.source_group, c.role, c.platform, c.kind)
+                == (group, role, fixletconventions.PLATFORM_ALL, SHOWN_KIND[role])
+            ]
+            if not cell:
+                continue
+            lines.append(f"{group} / {role} ({cell[0].total} items)")
+            lines += [f"  {c.files:>5} {c.share:>6.1%}  {c.pattern}" for c in cell[:top]]
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m tools.ingest.fixletbuild",
@@ -225,6 +280,24 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--branch", default="", help="with --git: default is the remote's HEAD")
     parser.add_argument("--commit", default="", help="with --git: default is the branch tip now")
     parser.add_argument("--subpath", default="", help="only read below this relative path")
+    parser.add_argument("--group", default="", help="with --dir or --git: the group it counts in")
+    parser.add_argument(
+        "--min-files", type=int, default=fixletconventions.MIN_FILES, help="convention support"
+    )
+    parser.add_argument(
+        "--min-share",
+        type=float,
+        default=None,
+        help="convention support as a share of the group, for every role (default: 0.10 for"
+        " applicability, 0.01 for property)",
+    )
+    parser.add_argument(
+        "--show-conventions",
+        type=int,
+        default=0,
+        metavar="N",
+        help="print each group's top N conventions (company content: local console only)",
+    )
     parser.add_argument("--sources", type=Path, default=fixlets.SOURCES_PATH)
     parser.add_argument("--scan-allow", type=Path, default=SCAN_ALLOW_PATH)
     parser.add_argument("--out", type=Path, help="default: <corpus>/index/" + INDEX_NAME)
@@ -258,6 +331,7 @@ def _requested_rows(args: argparse.Namespace) -> list[dict[str, str]]:
         branch=args.branch,
         commit=args.commit,
         subpath=args.subpath,
+        group=args.group,
     )
     fixlets.validate_row(row, "command line")
     return [row]
@@ -289,8 +363,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if any(read.error for read in reads):
         sys.stdout.write("not built: a source could not be read\n")
         return EXIT_PROBLEM
-    built = assemble(reads, allowed)
+    built = assemble(reads, allowed, min_files=args.min_files, min_share=args.min_share)
     sys.stdout.write(format_report(built))
+    if args.show_conventions:
+        sys.stdout.write(format_conventions(built.data, args.show_conventions))
     if not built.data.clauses:
         sys.stdout.write("nothing to index\n")
         return EXIT_PROBLEM
