@@ -1,2 +1,2 @@
 id,repo_url,branch,commit,subpath,license,pinned_on,notes
-developer-bigfix-com,https://github.com/bigfix/developer.bigfix.com.git,master,89435d306d01041767ae82b83057b443c5edb552,site/pages/relevance,Apache-2.0 (repo LICENSE),2026-10-21,Default branch HEAD when pinned; commit "Merge changes for 11.0.7 publication (#454)". Legal sign-off covers the website URLs; extension to this repo NOT yet confirmed.
+developer-bigfix-com,https://github.com/bigfix/developer.bigfix.com.git,master,89435d306d01041767ae82b83057b443c5edb552,site/pages/relevance,Apache-2.0 (repo LICENSE),2026-10-21,Default branch HEAD when pinned; commit "Merge changes for 11.0.7 publication (#454)". Legal sign-off covers this repo (confirmed by the user 2026-10-21).

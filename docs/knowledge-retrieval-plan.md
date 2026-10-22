@@ -28,8 +28,8 @@ is reported.
 |---|---|---|
 | 1 | Build in this repo or as a separate Claude skill | Confirmed: this repo |
 | 2 | Corpus location | Confirmed: raw files under `BIGFIX_CORPUS_DIR`, else `corpus/raw/`; the manifest always lives in `corpus/` |
-| 3 | Source list (URLs, PDF count and size) | Assumption confirmed, but **no URLs added yet**: `corpus/MANIFEST.csv` is still empty |
-| 4 | Legal sign-off on fetching and storing the sources | Confirmed for "the URLs in question" (2026-10-21). Only the URLs that sign-off covers may go in the manifest; record each one's license or terms in the `license` column. Publicly viewable is not the same as redistributable, so the sources stay out of git |
+| 3 | Source list (URLs, PDF count and size) | Confirmed. Two PDFs in `corpus/MANIFEST.csv` and one git source in `corpus/GIT_SOURCES.csv` |
+| 4 | Legal sign-off on fetching and storing the sources | Confirmed (2026-10-21) for the URLs and, per the user, for the git repos as well. Only sources that sign-off covers may go in either manifest; record each one's license or terms in the `license` column. Publicly viewable is not the same as redistributable, so the downloaded sources, converted text and index stay untracked and nothing is redistributed |
 
 ## Source strategy: git repos first (decided 2026-10-21)
 
@@ -43,9 +43,10 @@ source. Plain URLs (PDFs, pages with no repo) stay in `corpus/MANIFEST.csv`.
 The crawler idea was dropped; the two `developer.bigfix.com` page rows were
 removed from the manifest.
 
-**Open:** legal sign-off was given for the website URLs. Confirm it covers the
-repo too (it is Apache-2.0 per its `LICENSE`, but the sign-off is what counts
-here) before relying on it.
+**Legal:** the sign-off was first given for the website URLs; on 2026-10-21 the
+user confirmed it also covers the git repos. The repo is Apache-2.0 per its
+`LICENSE`. This records that confirmation; it is not legal advice, and it does
+not extend to redistributing the sources.
 
 ### First pinned source: developer.bigfix.com
 
@@ -303,11 +304,11 @@ the Phase 5 golden set early, because it decides whether to continue.
 
 ## Resuming
 
-1. Confirm the open legal question (decision 4: does the sign-off cover the repo?).
-2. Rebuild from scratch on any machine:
+1. Rebuild from scratch on any machine:
    `python -m tools.ingest.gitsource`, `python -m tools.ingest.fetch`,
    `python -m tools.ingest.build --dry-run`, then `python -m tools.ingest.build`.
-3. Continue with Phase 4 (the `write_relevance` prompt and curated resources).
+   Point `BIGFIX_KNOWLEDGE_INDEX` at the result to use it from the server.
+2. Continue with Phase 4 (the `write_relevance` prompt and curated resources).
    The tool it drives is `search_relevance_docs`; the index schema is in
    `tools/ingest/index.py`, and `examples` already holds the query, expected
    answers/errors, dialect and context that Phase 5 turns into a golden set.
