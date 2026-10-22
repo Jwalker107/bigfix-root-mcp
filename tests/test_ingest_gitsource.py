@@ -219,3 +219,35 @@ class TestMain:
 
     def test_an_unreadable_sources_file_exits_2(self, tmp_path):
         assert gitsource.main(["--sources", str(tmp_path / "missing.csv")]) == 2
+
+
+class TestReEncodedFiles:
+    """A repository can store a file in one encoding and check it out in another."""
+
+    @pytest.fixture
+    def encoded_repo(self, tmp_path):
+        path = make_repo(tmp_path / "upstream")
+        commit_files(path, {".gitattributes": "*.enc working-tree-encoding=UTF-16LE\n"})
+        # the file must be valid in its working-tree encoding when it is added
+        (path / "pages").mkdir()
+        (path / "pages" / "note.enc").write_bytes("plain text\n".encode("utf-16-le"))
+        commit = commit_files(path, {"pages/a.md": "# A\n"}, "second")
+        return path, commit
+
+    def test_a_file_the_repository_re_encodes_is_not_a_local_change(self, encoded_repo, tmp_path):
+        path, commit = encoded_repo
+        raw = tmp_path / "raw"
+        sync(git_row(path, commit), raw)
+        checkout = raw / "docs"
+        # the worktree really differs from the stored bytes, by the repository's own rule
+        assert (checkout / "pages" / "note.enc").read_bytes().startswith(b"p\x00l\x00")
+        assert gitsource.is_clean(checkout, allow_schemes=FILE)
+        assert sync(git_row(path, commit), raw).status == fetch.STATUS_UNCHANGED
+
+    def test_a_real_change_is_still_caught_next_to_an_encoded_file(self, encoded_repo, tmp_path):
+        path, commit = encoded_repo
+        raw = tmp_path / "raw"
+        sync(git_row(path, commit), raw)
+        checkout = raw / "docs"
+        (checkout / "pages" / "a.md").write_text("# tampered\n", encoding="utf-8")
+        assert not gitsource.is_clean(checkout, allow_schemes=FILE)

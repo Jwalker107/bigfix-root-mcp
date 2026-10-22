@@ -687,6 +687,23 @@ scores with and without the hold-out only for comparison.
 | 6e | Tool, prompt step, resource note, README | The tool and the prompt step degrade cleanly with no index |
 | 6f | Tests and docs | Fixtures are synthetic; nothing confidential is committed |
 
+#### First real build (2026-10-22)
+
+Three sources, 8,917 clauses, all of which parse. Two are the team's own directories
+(47 and 580 files) and one is the public `jgstew/bigfix-content` repository (1,112
+files at commit `8d0cafe3d290`, 7,391 clauses). No credential was found; 22 credential-like
+assignments and 5 email addresses were kept as warnings. The public repository is
+five times the size of the team's own content, so **step 6d must count conventions per
+source (or per group of sources), never across all of them**: pooled, it would report
+the public repository's habits as the team's. Checking out that repository exposed a
+false positive in `gitsource.is_clean` (files the repository itself re-encodes on
+checkout, such as UTF-16 `.reg` files, looked modified); that is fixed and tested.
+
+Grouping, confirmed by the user 2026-10-22: `repository-sites` and `custom-site-2023` are the
+**team** group and `jgstew-bigfix-content` is a separate **public reference** group.
+6d reports conventions for each group on its own, and the search tool labels which
+group a result came from. The source list gets a `group` column for this in 6d.
+
 #### Decisions needed before 6e
 
 1. May search results from this index go to the model the MCP client uses? The

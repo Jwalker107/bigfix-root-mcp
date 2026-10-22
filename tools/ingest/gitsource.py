@@ -45,6 +45,9 @@ GIT_TIMEOUT_SECONDS = 600
 
 # `git ls-files --eol` prints: i/<index eol> w/<worktree eol> attr/<attributes...> <TAB> path
 _EOL_FIELDS = 3
+_NUL = chr(0)
+# how many paths are put on one git command line
+_ATTR_BATCH = 100
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -195,7 +198,8 @@ def is_clean(
     """True when the checkout matches its commit byte for byte.
 
     That means no modified, staged or untracked files, and no file whose line
-    endings were converted (for example by a user's core.autocrlf setting). The
+    endings were converted (for example by a user's core.autocrlf setting); a file
+    the repository itself re-encodes on checkout is not counted. The
     second check reads the files themselves: git's status can report such a
     checkout as clean when its stat cache was refreshed under a different
     autocrlf setting.
@@ -208,14 +212,50 @@ def is_clean(
     )
     if status:
         return False
-    listing = _git_out(["ls-files", "--eol"], checkout, allow_schemes=allow_schemes, runner=runner)
-    for line in listing.splitlines():
-        meta = line.split("\t", 1)[0].split()
+    kwargs = {"allow_schemes": allow_schemes, "runner": runner}
+    # -z keeps a path with unusual characters exact instead of quoted
+    listing = _git_out(["ls-files", "--eol", "-z"], checkout, **kwargs)
+    suspects = []
+    for record in listing.split(_NUL):
+        meta_text, _, path = record.partition("\t")
+        meta = meta_text.split()
         if len(meta) < _EOL_FIELDS:
             continue
         in_index, in_worktree = meta[0].removeprefix("i/"), meta[1].removeprefix("w/")
         # a file with an explicit eol attribute is meant to differ from the index
         if in_index != in_worktree and not any(field.startswith("eol=") for field in meta[2:]):
+            suspects.append(path)
+    return not suspects or _all_re_encoded(checkout, suspects, **kwargs)
+
+
+def _all_re_encoded(
+    checkout: Path,
+    paths: Sequence[str],
+    *,
+    allow_schemes: Collection[str],
+    runner: Runner,
+) -> bool:
+    """True when every path has a working-tree-encoding attribute.
+
+    Git stores such a file in one encoding and writes it out in another (UTF-16 for a
+    Windows .reg file, say), so its bytes are meant to differ from the stored blob. That
+    is the repository's own configuration, not a local change.
+    """
+    for start in range(0, len(paths), _ATTR_BATCH):
+        batch = paths[start : start + _ATTR_BATCH]
+        out = _git_out(
+            ["check-attr", "-z", "working-tree-encoding", "--", *batch],
+            checkout,
+            allow_schemes=allow_schemes,
+            runner=runner,
+        )
+        fields = out.split(_NUL)
+        encoded = {
+            fields[i]
+            for i in range(0, len(fields) - 2, 3)
+            if fields[i + 2] not in ("", "unspecified", "unset")
+        }
+        if not encoded.issuperset(batch):
             return False
     return True
 
