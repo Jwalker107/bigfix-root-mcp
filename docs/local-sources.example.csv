@@ -2,3 +2,4 @@ id,kind,location,branch,commit,subpath,group,notes
 team-fixlets,dir,<LOCAL_DIRECTORY_OF_BES_FILES>,,,,team,read in place; never modified
 team-repo,git,https://<HOST>/<ORG>/<REPO>.git,<BRANCH>,,<RELATIVE_SUBPATH>,team,blank commit = the branch tip when read; the commit is recorded
 public-repo,git,https://<HOST>/<ORG>/<PUBLIC_REPO>.git,,,,reference,a different group is counted on its own; blank group = the source alone
+team-doc,file,<LOCAL_PATH_TO_PDF_HTML_OR_MD>,,,,team,one private document for the documentation index; read in place; its SHA-256 is recorded

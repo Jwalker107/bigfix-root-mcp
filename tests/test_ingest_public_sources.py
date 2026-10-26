@@ -214,3 +214,25 @@ class TestReadingAPublicRow:
         assert code == 0
         assert commit[:12] in out
         assert "items with relevance: 1" in out
+
+
+class TestPrivateDocuments:
+    """A `file` row of the private list feeds the documentation index, not this one."""
+
+    def test_a_file_row_is_kept_out_of_the_fixlet_sources(self, tmp_path):
+        local = local_csv(
+            tmp_path,
+            "team,dir,C:/fixlets,,,,team,",
+            "guide,file,C:/docs/guide.pdf,,,,team,private",
+        )
+        listed = fixlets.all_sources(local, tmp_path / "none.csv")
+        assert [row["id"] for row in listed] == ["team"]
+        assert [row["id"] for row in fixlets.document_sources(local)] == ["guide"]
+
+    def test_a_file_row_takes_no_branch_commit_or_subpath(self, tmp_path):
+        local = local_csv(tmp_path, "guide,file,C:/docs/guide.pdf,main,,,team,")
+        with pytest.raises(ValueError, match="takes no branch"):
+            fixlets.read_sources(local)
+
+    def test_no_private_list_means_no_documents(self, tmp_path):
+        assert fixlets.document_sources(tmp_path / "missing.csv") == []

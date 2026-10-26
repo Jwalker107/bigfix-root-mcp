@@ -32,6 +32,7 @@ is reported.
 | 2 | Corpus location | Confirmed: raw files under `BIGFIX_CORPUS_DIR`, else `corpus/raw/`; the manifest always lives in `corpus/` |
 | 3 | Source list (URLs, PDF count and size) | Confirmed. Two PDFs in `corpus/MANIFEST.csv` and one git source in `corpus/GIT_SOURCES.csv` |
 | 4 | Legal sign-off on fetching and storing the sources | Confirmed (2026-10-21) for the URLs and, per the user, for the git repos as well. Only sources that sign-off covers may go in either manifest; record each one's license or terms in the `license` column. Publicly viewable is not the same as redistributable, so the downloaded sources, converted text and index stay untracked and nothing is redistributed |
+| 5 | Ship the built indexes, or build them per user | Decided by the user (2026-10-26): **built per user, never shipped.** Each user builds both indexes from the source lists on their own machine. No index file goes in the repository or the wheel, so no source needs clearing for redistribution, and private sources (`file` and `dir` rows of `corpus/local-sources.csv`) can go in either index |
 
 ## Source strategy: git repos first (decided 2026-10-21)
 
@@ -158,7 +159,7 @@ Modules in `tools/ingest/`:
 | `chunking.py` | markdown plus the site's template tags -> chunks and examples (pure functions) |
 | `convert.py` | HTML -> markdown (stdlib); PDF -> markdown via `pypdf` if installed |
 | `scan.py` | secret/PII heuristics; allowlist in `corpus/SCAN_ALLOW.csv` |
-| `index.py` | SQLite + FTS5 writer, schema version 2 (documented in the module; version 1 had no analyzer verdict) |
+| `index.py` | SQLite + FTS5 writer, schema version 3 (documented in the module; version 1 had no analyzer verdict, version 2 no `file` source kind) |
 | `verdict.py` | the offline analyzer's verdict on one query, stored with each example |
 | `build.py` | `python -m tools.ingest.build`: orchestrates all of the above |
 
@@ -380,8 +381,9 @@ What it found:
    flags an example that does not parse, and its note says what that means (for
    an example with documented `errors` the failure can be the point). The
    verdict only labels; results are not re-ranked by it. A server that reads
-   version 1 reports `available: false` for a version 2 index and says to
-   rebuild, and the reverse; restart the MCP server after an upgrade.
+   one schema version reports `available: false` for an index of another and says
+   to rebuild; restart the MCP server after an upgrade. (Version 3, 2026-10-26, adds
+   the `file` source kind; see "Private documents and single files" below.)
    The shared code is `tools/ingest/verdict.py`, used by the build and by
    `tools/eval/analyze_examples.py`.
 2. **Dialects are inferred only when the analyzer is definite.** An example
@@ -539,8 +541,8 @@ as the documentation work: build an index offline, search it read-only.
 
 **The reference corpus may be confidential.** Everything below follows from that:
 it is never tracked, never put in the wheel, and kept apart from the
-documentation index so the index-distribution decision (still deferred) cannot
-leak it.
+documentation index. Indexes are built per user and never shipped (decision 5,
+2026-10-26), so neither index is distributed.
 
 #### Scope
 
@@ -558,7 +560,7 @@ leak it.
 |---|---|---|
 | 1 | A separate function, in three parts: an offline ingest step, a separate index file, a separate read-only tool. Not a parameter on `write_relevance` or `search_relevance_docs` | The result shape differs (clause, role, purpose, observed conventions), and the confidentiality differs |
 | 2 | The scanner is an operator command, never a tool argument | A tool that read a path chosen by the model could be pointed at any directory by injected text |
-| 3 | Separate SQLite file, `corpus/index/fixlets.sqlite`, selected by `BIGFIX_FIXLET_INDEX` | Keeps company content out of the (possibly distributable) documentation index |
+| 3 | Separate SQLite file, `corpus/index/fixlets.sqlite`, selected by `BIGFIX_FIXLET_INDEX` | Keeps company content apart from the documentation index (neither is shipped: decision 5) |
 | 4 | Conventions are counted, not summarized by a model | Every claim is checkable and reproducible, with counts and example ids |
 | 5 | Observed conventions never override declared ones | `corpus/conventions.md` says what the team wants; the index says what the team has written, mistakes included |
 | 6 | Optional everywhere: no index configured means the tool answers `available: false` and the prompt skips its step | Same degradation as the documentation index |
@@ -801,6 +803,23 @@ and `group` set to `reference`, pinned at the commits that were indexed
 (`e18ba232b0a4` and `f203c874d402`), so the reference fixlet index still reads them and the
 documentation tools ignore them. `fixletbuild --all` reads both lists. The built index was not
 rebuilt: its content is unchanged.
+
+### Private documents and single files (2026-10-26)
+
+- **A `file` row** in `corpus/local-sources.csv` names one private document (PDF, HTML,
+  markdown or text) for the documentation index. It is read in place on every build and its
+  SHA-256 is recorded as its revision; only its file name is stored as its origin. The
+  reference fixlet index ignores `file` rows. This needed a `file` source kind, so the
+  documentation index schema is now version 3. First row: `webui-manual-nodejs-upgrade`, the
+  document "BigFix WebUI - How to Manually Upgrade Node.js".
+- **A `dir` row may name one `.bes` file** (no `subpath`), so a single item can be added
+  without the rest of its folder. First row: `webui-install-11-0-7`, the HCL Task "Install
+  BigFix WebUI Service (Version 11.0.7)", in the `team` group.
+- **Action ids fixed.** `bes.py` read an action's id from an `<ID>` child element, which BES
+  files do not have; it is the `ID` attribute (`<DefaultAction ID="Action1">`). Every action
+  script was stored as `default` or `action`; after the fix and a rebuild they carry their
+  real ids (16,570 are `Action1`). The test fixtures had used the child form, which is why
+  the tests passed.
 
 ### Source additions (2026-10-24 and 2026-10-25)
 

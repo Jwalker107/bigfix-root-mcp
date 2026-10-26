@@ -20,7 +20,7 @@ def fixlet_xml(title, description, script, *, option="OriginalRelevance"):
     return (
         f"<Fixlet><Title>{title}</Title><Description>{description}</Description>"
         "<Relevance>windows of operating system</Relevance>"
-        f'<DefaultAction><ID>Action1</ID><ActionScript MIMEType="{SHELL}">{script}'
+        f'<DefaultAction ID="Action1"><ActionScript MIMEType="{SHELL}">{script}'
         f'</ActionScript><SuccessCriteria Option="{option}"></SuccessCriteria></DefaultAction>'
         "</Fixlet>"
     )

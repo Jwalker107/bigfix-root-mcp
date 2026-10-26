@@ -102,8 +102,8 @@ authoring resources. Choices worth keeping:
 (`tools/ingest/fixlet*.py`, plan Phase 6). The content is the team's own, so:
 
 - **A separate index file and its own variable**, never merged into the
-  documentation index. The documentation index may one day be distributed; this
-  one is never, and the file says so in its meta table.
+  documentation index. Neither index is shipped: each user builds both from the
+  source lists (decided 2026-10-26). This one also says so in its meta table.
 - **The scan path is an operator command, not a tool argument.** A tool that read a
   directory a model chose could be pointed anywhere by injected text.
 - **Groups are counted on their own.** A public repository must not be reported as a

@@ -159,13 +159,15 @@ both are built by tools in this repository, not downloaded.
 
 | Index | Built from | Tool that reads it | Variable | File |
 | --- | --- | --- | --- | --- |
-| **Documentation** | Web pages, PDFs and git repositories of public documentation | `search_relevance_docs` | `BIGFIX_KNOWLEDGE_INDEX` | `corpus/index/relevance.sqlite` |
+| **Documentation** | Web pages, PDFs and git repositories of public documentation, plus any private documents you list | `search_relevance_docs` | `BIGFIX_KNOWLEDGE_INDEX` | `corpus/index/relevance.sqlite` |
 | **Reference fixlets** | `.bes` files in a directory or a git repository: your own existing content | `search_reference_fixlets` | `BIGFIX_FIXLET_INDEX` | `corpus/index/fixlets.sqlite` |
 
 Everything the tools download, convert or build lives under `corpus/` and is ignored by git
 (see [corpus/README.md](corpus/README.md)). Public availability is not permission to
 redistribute: only add sources you are cleared to use, and note that the reference
 fixlet index holds your own company content, so never commit, package or share it.
+Neither index is shipped: each user builds both on their own machine from the source
+lists. The documentation index can hold private documents too, so the same applies to it.
 
 Run every command from the repository root. `uv sync` installs the development group,
 which includes `pypdf`, needed only to read PDFs. Use `uv run python -m ...`, or plain
@@ -220,6 +222,15 @@ python -m tools.ingest.gitsource --dry-run
 python -m tools.ingest.gitsource
 ```
 
+**A private document** (a PDF, HTML, markdown or text file that must stay local). Add a
+`file` row to the untracked `corpus/local-sources.csv`, the same private list the fixlet
+index reads; only the documentation index uses `file` rows. The file is read in place on
+every build and its SHA-256 is recorded; only its file name is stored as its origin:
+
+```
+team-doc,file,C:/path/to/guide.pdf,,,,team,private; read in place
+```
+
 **Regenerate the documentation index.** The index is rebuilt from scratch from every row, so
 this is also how you pick up a change or remove a source (delete its row first):
 
@@ -269,7 +280,8 @@ public-repo,https://github.com/example/public-content,,0123456789abcdef012345678
 ```
 
 - A **directory** is read in place and never modified. Every `.bes` file under it is found,
-  in any letter case. Links and junctions are not followed.
+  in any letter case. Links and junctions are not followed. A `dir` row may also name one
+  `.bes` file (with no `subpath`), to add a single item without the rest of its folder.
 - A **git repository** is checked out under `corpus/raw/fixlets/<id>/`. A blank `commit` means
   the branch tip at the moment it is read; the commit is recorded. Put a full SHA there to
   read exactly the same content again. Use `https` (git must be able to sign in without a

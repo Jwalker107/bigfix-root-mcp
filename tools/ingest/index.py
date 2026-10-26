@@ -1,11 +1,12 @@
 """Write the relevance knowledge index (SQLite with FTS5).
 
-Schema version 2:
+Schema version 3 (version 2 had no 'file' source kind):
 
   meta      key/value: schema_version, built_at (UTC), sqlite_version, counts,
             and analyzer_version when the examples were analysed.
   sources   one row per ingested source: where it came from and exactly which
-            revision (a git commit, or the SHA-256 of the fetched file).
+            revision (a git commit, or the SHA-256 of the fetched or local file).
+            kind is 'git', 'url' or 'file' (a private document read in place).
   chunks    heading-sized pieces of documentation. kind is 'explanation' or
             'inspector' (the generated per-inspector reference).
   examples  relevance examples, each tied to the chunk it appears in. answers
@@ -43,7 +44,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DIALECTS = ("session", "client", "both", "unknown")
 DIALECT_SOURCES = ("source", "analyzer")
@@ -53,7 +54,7 @@ _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE sources (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('git', 'url')),
+    kind TEXT NOT NULL CHECK (kind IN ('git', 'url', 'file')),
     origin TEXT NOT NULL,
     revision TEXT NOT NULL,
     license TEXT NOT NULL,

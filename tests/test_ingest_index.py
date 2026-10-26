@@ -246,7 +246,7 @@ def test_the_analyzer_version_is_recorded_only_when_there_is_one(tmp_path):
 
     assert meta(with_version)["analyzer_version"] == "9.9.9"
     assert "analyzer_version" not in meta(without)
-    assert meta(with_version)["schema_version"] == "2"
+    assert meta(with_version)["schema_version"] == str(index.SCHEMA_VERSION)
 
 
 @pytest.mark.parametrize(

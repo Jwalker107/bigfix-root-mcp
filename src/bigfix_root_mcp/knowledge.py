@@ -27,7 +27,7 @@ from pathlib import Path
 
 INDEX_ENV = "BIGFIX_KNOWLEDGE_INDEX"
 # the index schema this code reads (tools/ingest/index.py writes it)
-SUPPORTED_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSION = 3
 
 DEFAULT_LIMIT = 5
 MAX_SEARCH_LIMIT = 25

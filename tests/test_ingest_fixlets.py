@@ -163,6 +163,21 @@ class TestDirectory:
         read = fixlets.read_source(row(kind="svn"), tmp_path, clock=clock)
         assert "kind must be" in read.error
 
+    def test_one_bes_file_is_read_without_the_rest_of_its_folder(self, tmp_path):
+        tree = write_tree(tmp_path / "tree", {"wanted.bes": bes_text(), "other.bes": bes_text()})
+        read = self.read(tree / "wanted.bes")
+        assert read.error == ""
+        assert (read.record["files"], read.record["items"]) == (1, 1)
+        assert [item.path for item in read.extraction.items] == ["wanted.bes"]
+
+    def test_a_file_that_is_not_bes_is_an_error(self, tmp_path):
+        tree = write_tree(tmp_path / "tree", {"notes.txt": "hello"})
+        assert "not a directory or a .bes file" in self.read(tree / "notes.txt").error
+
+    def test_a_single_file_takes_no_subpath(self, tmp_path):
+        tree = write_tree(tmp_path / "tree", {"a.bes": bes_text()})
+        assert "takes no subpath" in self.read(tree / "a.bes", subpath="x").error
+
     def test_the_report_names_counts_never_contents(self, tmp_path):
         tree = write_tree(tmp_path / "tree", {"a.bes": bes_text("name of it = PLANTEDTEXT")})
         report = fixlets.format_read(self.read(tree))

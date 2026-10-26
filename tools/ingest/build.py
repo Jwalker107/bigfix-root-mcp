@@ -1,7 +1,8 @@
 """Build the relevance knowledge index from the pinned corpus.
 
 Reads corpus/GIT_SOURCES.csv (git sources, each pinned to a commit) and
-corpus/MANIFEST.csv (URL sources, each pinned by SHA-256), converts them to
+corpus/MANIFEST.csv (URL sources, each pinned by SHA-256), plus the `file` rows of
+the untracked corpus/local-sources.csv (private documents, read in place), converts them to
 markdown, scans for secrets, splits them into chunks and examples, and writes
 corpus/index/relevance.sqlite (see index.py for the schema).
 
@@ -38,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
-from tools.ingest import chunking, convert, fetch, gitsource, index, scan, verdict
+from tools.ingest import chunking, convert, fetch, fixlets, gitsource, index, scan, verdict
 
 log = logging.getLogger("corpus.build")
 
@@ -124,7 +125,7 @@ class SourceProblem(Exception):  # noqa: N818 - carries a status, not only an er
 @dataclass
 class SourceReport:
     id: str
-    kind: str  # git or url
+    kind: str  # git, url or file
     status: str = STATUS_INGESTED
     detail: str = ""
     files: int = 0
@@ -304,6 +305,48 @@ def _load_url_source(row: dict[str, str], raw_dir: Path, md_dir: Path, *, dry_ru
     return _Loaded(source, [document], None, Counter())
 
 
+def _load_file_source(row: dict[str, str], md_dir: Path, *, dry_run: bool) -> _Loaded:
+    """A private document named by a `file` row of corpus/local-sources.csv, read in place.
+
+    It has no pin: the SHA-256 of the file as read is recorded as its revision. Only the
+    file name is stored as its origin, because the full path can itself be internal.
+    """
+    source_id = row["id"].strip()
+    target = Path(row["location"]).expanduser()
+    if not target.is_file():
+        raise SourceProblem(STATUS_SKIPPED, f"file {target.name} is not found at its location")
+    data = target.read_bytes()
+    try:
+        markdown = _to_markdown(target, data)
+    except SourceProblem:
+        raise
+    except convert.ConverterUnavailableError as err:
+        raise SourceProblem(STATUS_SKIPPED, str(err)) from err
+    except UnicodeDecodeError as err:
+        raise SourceProblem(STATUS_ERROR, f"{target.name}: not valid UTF-8 ({err.reason})") from err
+    except Exception as err:
+        # a third-party parser failing on untrusted input is a bad source, not a crash
+        raise SourceProblem(
+            STATUS_ERROR, f"conversion failed: {type(err).__name__}: {err}"
+        ) from err
+    if not markdown.strip():
+        raise SourceProblem(STATUS_ERROR, "conversion produced no text")
+    if not _H1.search(markdown):
+        # a PDF converts to `## Page N` sections; the file name is a better heading
+        markdown = f"# {target.stem}\n\n{markdown}"
+    document = Document(f"{source_id}.md", markdown)
+    if not dry_run:
+        fetch.atomic_write(md_dir / document.path, markdown.encode("utf-8"))
+    source = index.SourceRow(
+        id=source_id,
+        kind="file",
+        origin=f"private file {target.name}",
+        revision=hashlib.sha256(data).hexdigest(),
+        license=row.get("notes", ""),
+    )
+    return _Loaded(source, [document], None, Counter())
+
+
 def _example_context(path: tuple[str, ...], example: chunking.Example) -> str:
     return " ".join(part for part in (" > ".join(path), example.before, example.after) if part)
 
@@ -321,9 +364,14 @@ def build(
     strict: bool = False,
     max_chunk_chars: int = chunking.MAX_CHUNK_CHARS,
     built_at: datetime | None = None,
+    file_rows: Sequence[dict[str, str]] = (),
 ) -> BuildResult:
     """Run the whole pipeline. See the module docstring for statuses and exit codes."""
-    wanted = [("git", row) for row in git_rows] + [("url", row) for row in url_rows]
+    wanted = (
+        [("git", row) for row in git_rows]
+        + [("url", row) for row in url_rows]
+        + [("file", row) for row in file_rows]
+    )
     if only:
         wanted = [(kind, row) for kind, row in wanted if row["id"].strip() in only]
 
@@ -333,11 +381,12 @@ def build(
         report = SourceReport(id=row["id"].strip(), kind=kind)
         reports.append(report)
         try:
-            item = (
-                _load_git_source(row, raw_dir)
-                if kind == "git"
-                else _load_url_source(row, raw_dir, md_dir, dry_run=dry_run)
-            )
+            if kind == "git":
+                item = _load_git_source(row, raw_dir)
+            elif kind == "url":
+                item = _load_url_source(row, raw_dir, md_dir, dry_run=dry_run)
+            else:
+                item = _load_file_source(row, md_dir, dry_run=dry_run)
         except SourceProblem as problem:
             report.status, report.detail = problem.status, problem.detail
             continue
@@ -492,6 +541,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--strict", action="store_true", help="treat skipped sources as failures")
     parser.add_argument("--git-sources", type=Path, default=gitsource.GIT_SOURCES_PATH)
     parser.add_argument("--manifest", type=Path, default=fetch.REPO_CORPUS / "MANIFEST.csv")
+    parser.add_argument(
+        "--local-sources",
+        type=Path,
+        default=fixlets.SOURCES_PATH,
+        help="the private list; its `file` rows are private documents (default: %(default)s)",
+    )
     parser.add_argument("--scan-allow", type=Path, default=SCAN_ALLOW_PATH)
     parser.add_argument("--raw-dir", type=Path, default=base / "raw")
     parser.add_argument("--md-dir", type=Path, default=base / "md")
@@ -522,12 +577,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             else []
         )
         _, url_rows = fetch.read_manifest(args.manifest)
+        file_rows = fixlets.document_sources(args.local_sources)
         allowed = scan.read_allowlist(args.scan_allow)
     except (OSError, ValueError) as err:
         # a bad manifest is a user error; a traceback would only bury the message
         log.error("cannot read the corpus manifests: %s", err)  # noqa: TRY400
         return EXIT_USAGE
-    ids = [row["id"].strip() for row in [*git_rows, *url_rows]]
+    ids = [row["id"].strip() for row in [*git_rows, *url_rows, *file_rows]]
     duplicates = sorted({i for i in ids if ids.count(i) > 1})
     if duplicates:
         log.error("source id used in both manifests: %s", ", ".join(duplicates))
@@ -544,6 +600,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         only=args.only,
         strict=args.strict,
         max_chunk_chars=args.max_chunk_chars,
+        file_rows=file_rows,
     )
     sys.stdout.write(format_report(result, args.index, dry_run=args.dry_run))
     return result.exit_code

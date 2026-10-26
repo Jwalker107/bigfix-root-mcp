@@ -23,7 +23,7 @@ def action_fixlet(
     return (
         f"<Fixlet><Title>{title}</Title><Description>Does a job</Description>"
         f"<Relevance>{relevance}</Relevance>"
-        f"<DefaultAction><ID>Action1</ID><Description>go</Description>"
+        f'<DefaultAction ID="Action1"><Description>go</Description>'
         f'<ActionScript MIMEType="{SHELL}">{script}</ActionScript>{criteria}'
         "</DefaultAction></Fixlet>"
     )
@@ -147,9 +147,9 @@ END_X"""
     def test_each_action_of_an_item_is_its_own_row(self, tmp_path):
         body = (
             "<Task><Title>Two</Title><Description>d</Description><Relevance>true</Relevance>"
-            f'<DefaultAction><ID>A1</ID><ActionScript MIMEType="{SHELL}">wait one'
+            f'<DefaultAction ID="A1"><ActionScript MIMEType="{SHELL}">wait one'
             "</ActionScript></DefaultAction>"
-            f'<Action><ID>A2</ID><ActionScript MIMEType="{SHELL}">wait two'
+            f'<Action ID="A2"><ActionScript MIMEType="{SHELL}">wait two'
             "</ActionScript></Action></Task>"
         )
         rows = action_rows(build(tmp_path, {"t.bes": document(body)}))

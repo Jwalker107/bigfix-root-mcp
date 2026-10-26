@@ -58,7 +58,11 @@ LEGACY_SOURCES_NAME = "fixlet-sources.csv"  # its name before it was renamed
 PUBLIC_SOURCES_PATH = gitsource.GIT_SOURCES_PATH
 COLUMNS = ("id", "kind", "location", "branch", "commit", "subpath", "group", "notes")
 REQUIRED_COLUMNS = ("id", "kind", "location")
-KINDS = ("dir", "git")
+KINDS = ("dir", "git", "file")
+# a `file` row is one private document (PDF, HTML, markdown, text) for the documentation
+# index (tools/ingest/build.py); only `dir` and `git` rows hold Fixlets
+FIXLET_KINDS = ("dir", "git")
+DOCUMENT_KIND = "file"
 READS_NAME = "fixlet-reads.jsonl"
 RAW_SUBDIR = "fixlets"  # checkouts live apart from the documentation sources
 
@@ -102,7 +106,9 @@ def validate_row(row: dict[str, str], label: str = "source") -> None:
         or ".." in parts
     ):
         raise ValueError(f"{label} {source_id}: subpath must be a relative path inside the source")
-    if kind == "dir":
+    if kind == DOCUMENT_KIND and (subpath or row.get("branch") or row.get("commit")):
+        raise ValueError(f"{label} {source_id}: a file source takes no branch, commit or subpath")
+    if kind in ("dir", DOCUMENT_KIND):
         return
     if location.startswith("-") or any(ch.isspace() for ch in location):
         raise ValueError(f"{label} {source_id}: invalid git location")
@@ -167,12 +173,20 @@ def all_sources(
     if not local_path.exists() and legacy.exists():
         raise ValueError(f"{legacy.name} is now called {local_path.name}: rename the file")
     local = read_sources(local_path) if local_path.exists() else []
+    local = [row for row in local if row["kind"] in FIXLET_KINDS]
     public = public_sources(public_path)
     ids = [row["id"] for row in [*local, *public]]
     clash = sorted({i for i in ids if ids.count(i) > 1})
     if clash:
         raise ValueError(f"source id used in both lists: {', '.join(clash)}")
     return [*local, *public]
+
+
+def document_sources(local_path: Path = SOURCES_PATH) -> list[dict[str, str]]:
+    """The private documents (`file` rows) of the private list, for the documentation index."""
+    if not local_path.exists():
+        return []
+    return [row for row in read_sources(local_path) if row["kind"] == DOCUMENT_KIND]
 
 
 def adhoc_row(
@@ -247,11 +261,16 @@ def _record(row: dict[str, str], when: str, extraction: bes.Extraction, **extra:
 
 def _read_directory(row: dict[str, str], when: str) -> Read:
     directory = Path(row["location"]).expanduser()
-    if not directory.is_dir():
-        return Read(row["id"], error=f"{directory} is not a directory")
+    # a `dir` row may also name one .bes file, so a single item can be added without
+    # reading everything else in its folder
+    single = directory.is_file() and directory.suffix.lower() == bes.EXTENSION
+    if not (directory.is_dir() or single):
+        return Read(row["id"], error=f"{directory} is not a directory or a .bes file")
+    if single and row["subpath"]:
+        return Read(row["id"], error="a single .bes file takes no subpath")
     resolved = {**row, "location": str(directory.resolve())}
     try:
-        root = _inside(directory, row["subpath"])
+        root = directory.resolve() if single else _inside(directory, row["subpath"])
     except ValueError as err:
         return Read(row["id"], error=str(err))
     extraction = bes.extract(root, actions=True)

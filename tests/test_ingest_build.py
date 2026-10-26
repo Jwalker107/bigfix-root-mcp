@@ -12,7 +12,7 @@ import pytest
 
 from tests.ingest_git import commit_files, git, git_row, make_repo
 from tests.ingest_pdf import make_pdf
-from tools.ingest import build, fetch, gitsource
+from tools.ingest import build, fetch, gitsource, index
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -485,6 +485,7 @@ class TestMain:
             "--git-sources", str(git_path),
             "--manifest", str(manifest),
             "--scan-allow", str(tmp_path / "none.csv"),
+            "--local-sources", str(tmp_path / "local-sources.csv"),
             "--raw-dir", str(tmp_path / "raw"),
             "--md-dir", str(tmp_path / "md"),
             "--index", str(tmp_path / "index" / "relevance.sqlite"),
@@ -520,6 +521,60 @@ class TestMain:
         args = self.write_manifests(tmp_path, url_rows=[url_row(tmp_path)])
         args[1] = str(tmp_path / "no-such-git-sources.csv")
         assert build.main(args) == build.EXIT_OK
+
+
+def file_row(location, *, source_id="private-doc", notes="private; legal sign-off"):
+    return {"id": source_id, "kind": "file", "location": str(location), "notes": notes}
+
+
+class TestPrivateFiles:
+    """A `file` row of the private list: one document, read in place, never pinned."""
+
+    def test_a_markdown_file_is_indexed_with_its_hash_and_only_its_name(self, tmp_path):
+        doc = tmp_path / "private" / "Upgrade Steps.md"
+        doc.parent.mkdir()
+        doc.write_text("## Steps\n\nStop the service, then replace the binary.\n", encoding="utf-8")
+        result = run(tmp_path, file_rows=[file_row(doc)])
+        assert result.exit_code == build.EXIT_OK, result.reports
+        assert result.reports[0].kind == "file"
+        [(kind, origin, revision, license_)] = rows(
+            tmp_path, "SELECT kind, origin, revision, license FROM sources"
+        )
+        assert kind == "file"
+        assert origin == "private file Upgrade Steps.md"
+        assert str(tmp_path) not in origin  # the full path stays out of the index
+        assert revision == hashlib.sha256(doc.read_bytes()).hexdigest()
+        assert license_ == "private; legal sign-off"
+        headings = [h for (h,) in rows(tmp_path, "SELECT section_path FROM chunks")]
+        assert any("Upgrade Steps" in h for h in headings)  # the file name heads it
+
+    def test_a_pdf_is_converted(self, tmp_path):
+        pytest.importorskip("pypdf")
+        doc = tmp_path / "guide.pdf"
+        doc.write_bytes(make_pdf(["Stop the BES WebUI service before you replace node."]))
+        result = run(tmp_path, file_rows=[file_row(doc)])
+        assert result.exit_code == build.EXIT_OK, result.reports
+        texts = " ".join(t for (t,) in rows(tmp_path, "SELECT text FROM chunks"))
+        assert "BES WebUI service" in texts
+
+    def test_a_missing_file_is_skipped_not_fatal(self, tmp_path):
+        result = run(tmp_path, file_rows=[file_row(tmp_path / "gone.pdf")])
+        assert result.reports[0].status == build.STATUS_SKIPPED
+        assert "gone.pdf" in result.reports[0].detail
+
+    def test_main_reads_file_rows_from_the_private_list(self, tmp_path, capsys):
+        doc = tmp_path / "notes.md"
+        doc.write_text("# Notes\n\nA private page.\n", encoding="utf-8")
+        args = TestMain().write_manifests(tmp_path)
+        (tmp_path / "local-sources.csv").write_text(
+            "id,kind,location,branch,commit,subpath,group,notes\n"
+            f"team-notes,file,{doc},,,,team,private\n"
+            f"team-fixlets,dir,{tmp_path},,,,team,a fixlet folder is not a document\n",
+            encoding="utf-8",
+        )
+        assert build.main(args) == build.EXIT_OK
+        ids = [i for (i,) in rows(tmp_path, "SELECT id FROM sources")]
+        assert ids == ["team-notes"]
 
 
 class TestAnalyzerVerdict:
@@ -602,7 +657,7 @@ class TestAnalyzerVerdict:
 
         meta = dict(rows(built[0], "SELECT key, value FROM meta"))
         assert meta["analyzer_version"] == verdict.analyzer_version()
-        assert meta["schema_version"] == "2"
+        assert meta["schema_version"] == str(index.SCHEMA_VERSION)
 
     def test_an_analyzer_crash_leaves_examples_unjudged_not_the_build_failed(
         self, tmp_path, monkeypatch

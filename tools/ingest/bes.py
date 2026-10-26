@@ -141,7 +141,8 @@ def _actions(element: etree._Element) -> list[Action]:
             found.append(
                 Action(
                     kind=kind,
-                    action_id=_text(action.find("ID")),
+                    # an attribute in BES.xsd (<DefaultAction ID="Action1">), not a child
+                    action_id=action.get("ID", "").strip(),
                     mime_type=script.get("MIMEType", ""),
                     script=text[:SCRIPT_CHARS],
                     truncated=len(text) > SCRIPT_CHARS,
@@ -192,8 +193,11 @@ def bes_files(root: Path) -> list[Path]:
     """Every .bes file under root, in any letter case (.BES too), in a stable order.
 
     The order is by relative posix path, so one tree always gives one sequence on any
-    platform. Symbolic links and the directories in SKIP_DIRS are left alone.
+    platform. Symbolic links and the directories in SKIP_DIRS are left alone. A root that
+    is itself one .bes file gives just that file.
     """
+    if root.is_file():
+        return [root] if root.suffix.lower() == EXTENSION and not _is_link(root) else []
     found: list[tuple[str, Path]] = []
     for directory, subdirs, names in os.walk(root, followlinks=False):
         here = Path(directory)
@@ -213,7 +217,7 @@ def extract(root: Path, *, actions: bool = False) -> Extraction:
     seen_items: set[tuple] = set()
     entries: list[str] = []
     for path in bes_files(root):
-        relative = path.relative_to(root).as_posix()
+        relative = path.name if path == root else path.relative_to(root).as_posix()
         data = path.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
         result.files += 1

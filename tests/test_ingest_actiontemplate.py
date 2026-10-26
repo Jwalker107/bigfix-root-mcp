@@ -150,14 +150,14 @@ def default_action(
 ):
     criteria = f'<SuccessCriteria Option="{option}"></SuccessCriteria>' if option else ""
     return (
-        f"<DefaultAction><ID>{id_}</ID><Description>go</Description>"
+        f'<DefaultAction ID="{id_}"><Description>go</Description>'
         f'<ActionScript MIMEType="{mime}">{script}</ActionScript>{criteria}</DefaultAction>'
     )
 
 
 def extra_action(script, *, id_="Action2"):
     return (
-        f"<Action><ID>{id_}</ID><Description>more</Description>"
+        f'<Action ID="{id_}"><Description>more</Description>'
         f'<ActionScript MIMEType="{SHELL}">{script}</ActionScript></Action>'
     )
 
