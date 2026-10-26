@@ -260,6 +260,16 @@ TARGETING_DESCRIPTION = (
     "operator can see, not necessarily all computers in BigFix."
 )
 
+USE_CLIENT_CONTEXT_FIELD = Field(
+    description=(
+        "Evaluate the query in agent (client) context: sends <UseClientContext>true"
+        "</UseClientContext> with the query. Set it when an inspector answers 'No "
+        "inspector context.' in a plain client query, e.g. 'version of registration "
+        "server', which Fixlet relevance can use. Much slower (118 s observed against "
+        "2 s), so allow a timeout of 180 s or more. Default: false (element left out)."
+    )
+)
+
 
 @mcp.tool
 @bes_errors("session_relevance_query")
@@ -538,6 +548,7 @@ def client_query_submit(
         str | None,
         Field(description="Client relevance targeting expression."),
     ] = None,
+    use_client_context: Annotated[bool, USE_CLIENT_CONTEXT_FIELD] = False,
 ) -> dict:
     """Submit a client fast query and return its query_id immediately.
 
@@ -556,7 +567,9 @@ def client_query_submit(
         computer_names=target_computer_names,
         target_relevance=target_relevance,
     )
-    query_id = clientquery.submit_client_query(conn, query_text, target_xml)
+    query_id = clientquery.submit_client_query(
+        conn, query_text, target_xml, use_client_context=use_client_context
+    )
     return _with_advisory({"query_id": query_id, "expected_count": expected_count}, advisory)
 
 
@@ -633,6 +646,7 @@ async def client_query(
     ] = None,
     limit: Annotated[int | None, LIMIT_FIELD] = None,
     offset: Annotated[int, OFFSET_FIELD] = 0,
+    use_client_context: Annotated[bool, USE_CLIENT_CONTEXT_FIELD] = False,
 ) -> dict:
     """Submit a client fast query, poll for results, return them when done.
 
@@ -656,7 +670,9 @@ async def client_query(
     if expected_count is None:
         expected_count = derived_count
 
-    query_id = clientquery.submit_client_query(conn, query_text, target_xml)
+    query_id = clientquery.submit_client_query(
+        conn, query_text, target_xml, use_client_context=use_client_context
+    )
     # progress notifications (not ctx.info logging: the logging capability is
     # deprecated in the 2026-07-28 stateless protocol this server targets)
     await ctx.report_progress(

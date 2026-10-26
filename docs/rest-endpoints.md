@@ -33,6 +33,36 @@ Verified to exist but **deliberately not implemented**: `POST /api/actions`
 `/computergroups`, `/settings`, `/tasks` and `/fixletsandtasks` sub-resources,
 reachable today through `api_get`.
 
+## Client queries in agent context
+
+`POST /api/clientquery` takes this element (schema provided by the user,
+2026-10-26):
+
+```xml
+<xs:element name="ClientQuery">
+    <xs:complexType>
+        <xs:sequence>
+            <xs:element name="ApplicabilityRelevance" type="xs:normalizedString" minOccurs="1" maxOccurs="1"/>
+            <xs:element name="QueryText" type="xs:normalizedString" minOccurs="1" maxOccurs="1" />
+            <xs:element name="UseClientContext" type="xs:boolean" minOccurs="0" />
+            <xs:element name="Target" type="BESClientQueryTarget" minOccurs="0" />
+        </xs:sequence>
+    </xs:complexType>
+</xs:element>
+```
+
+When `UseClientContext` is present and true, the agent evaluates the query in
+agent (client) context. Without it, some inspectors that Fixlet relevance can use
+fail. Live, on a Windows agent, `version of registration server` answered
+`No inspector context.` as a plain client query. `client_query` and
+`client_query_submit` take `use_client_context` (default false), which adds
+`<UseClientContext>true</UseClientContext>` after `QueryText` and before `Target`,
+as the sequence requires. Without it the element is left out.
+
+Verified live (2026-10-26, BigFix 11.0.7.61, Windows agent `WEBUI`): `version of
+registration server` answered `No inspector context.` in about 2 seconds without the
+element, and `11.0.7.61` with it, after a response time of 118 seconds.
+
 ## Site paths
 
 `GET /api/sites` is the only authoritative source for a site's REST path. The

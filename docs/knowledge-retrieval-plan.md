@@ -820,6 +820,12 @@ rebuilt: its content is unchanged.
   script was stored as `default` or `action`; after the fix and a rebuild they carry their
   real ids (16,570 are `Action1`). The test fixtures had used the child form, which is why
   the tests passed.
+- **Client queries in agent context.** `client_query` and `client_query_submit` take
+  `use_client_context`, which sends `<UseClientContext>true</UseClientContext>` (schema in
+  [rest-endpoints.md](rest-endpoints.md)). A plain client query answers `No inspector
+  context.` for some inspectors Fixlet relevance can use, such as `version of registration
+  server`. The prompts tell the model to retry with it. Verified live on WEBUI: plain, `No
+  inspector context.` in about 2 seconds; with the element, `11.0.7.61` after 118 seconds.
 
 ### Source additions (2026-10-24 and 2026-10-25)
 

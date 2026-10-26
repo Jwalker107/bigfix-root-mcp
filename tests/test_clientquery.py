@@ -88,6 +88,20 @@ class TestBuildClientQueryXml:
         with pytest.raises(ValueError, match="non-empty"):
             clientquery.build_client_query_xml("  ", "<AllComputers>true</AllComputers>")
 
+    def test_client_context_is_left_out_by_default(self):
+        payload = clientquery.build_client_query_xml("computer name", "<x/>")
+        assert "UseClientContext" not in payload
+
+    def test_client_context_goes_between_query_text_and_target(self):
+        """The schema's sequence: ApplicabilityRelevance, QueryText, UseClientContext, Target."""
+        payload = clientquery.build_client_query_xml(
+            "version of registration server", "<x/>", use_client_context=True
+        )
+        assert (
+            "<QueryText>version of registration server</QueryText>"
+            "<UseClientContext>true</UseClientContext><Target><x/></Target>"
+        ) in payload
+
 
 class TestSubmitClientQuery:
     def test_returns_int_id(self):
@@ -126,6 +140,16 @@ class TestSubmitClientQuery:
         conn.client_query_submit = lambda query_text, target_xml: "7"
         assert clientquery.submit_client_query(conn, "computer name", "<x/>") == 7
         assert conn.calls == []  # local implementation not used
+
+    def test_client_context_bypasses_the_native_method_that_cannot_send_it(self):
+        conn = FakeBESConnection()
+        conn.client_query_submit = lambda query_text, target_xml: "7"
+        conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
+        query_id = clientquery.submit_client_query(
+            conn, "computer name", "<x/>", use_client_context=True
+        )
+        assert query_id == 42
+        assert "<UseClientContext>true</UseClientContext>" in conn.calls[0][2]
 
 
 class TestSummarizeResults:

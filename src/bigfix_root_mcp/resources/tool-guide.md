@@ -11,6 +11,15 @@ Session relevance is a single fast round-trip. A client query costs seconds to
 minutes and only reaches agents that are online. When both could work, use
 session relevance.
 
+A plain client query does not run in the full agent context, so some inspectors
+that Fixlet relevance can use (for example `version of registration server`)
+answer `No inspector context.`. Set `use_client_context=true` on `client_query` or
+`client_query_submit` to run the query in agent (client) context: the server is
+sent `<UseClientContext>true</UseClientContext>` with the query. Leave it off
+otherwise. It is much slower: on one agent a plain query answered in about 2 seconds
+and the same agent took 118 seconds in client context, so give `client_query` a
+`timeout_seconds` of 180 or more, or submit and fetch the results later.
+
 ## Which read tool
 
 | You want | Tool |
