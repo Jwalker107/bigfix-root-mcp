@@ -103,7 +103,7 @@ _NOTE = (
 )
 
 _HOW_TO_ENABLE = (
-    "Build the index from the repository (list the sources in corpus/fixlet-sources.csv, "
+    "Build the index from the repository (list the sources in corpus/local-sources.csv, "
     "then python -m tools.ingest.fixletbuild --all) and set "
     f"{INDEX_ENV} to the resulting corpus/index/fixlets.sqlite, then restart the server."
 )

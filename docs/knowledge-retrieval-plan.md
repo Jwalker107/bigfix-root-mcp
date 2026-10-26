@@ -564,9 +564,9 @@ leak it.
 
 #### Sources: a directory or a git repository
 
-Two source kinds, one list. The list is **untracked** (`corpus/fixlet-sources.csv`,
+Two source kinds, one list. The list is **untracked** (`corpus/local-sources.csv`, called `fixlet-sources.csv` until 2026-10-26,
 gitignored), because a company repository's URL or path is itself internal. A
-tracked template, `docs/fixlet-sources.example.csv`, shows the columns.
+tracked template, `docs/local-sources.example.csv`, shows the columns.
 
 `id, kind, location, branch, commit, subpath, notes`
 
@@ -686,7 +686,7 @@ How to build the index from each kind of source, step by step:
 | Step | Work | Done when |
 |---|---|---|
 | 6a (done 2026-10-22) | Move the `.bes` parser to `tools/ingest/bes.py`; the question tool uses it | Its candidates output is byte-identical on the real source (183 candidates); the question tests pass with only their import repointed. Two fixes came with the move: `.BES` is found on case-sensitive systems, and symbolic links and Windows junctions are never followed |
-| 6b (done 2026-10-22) | Source list, directory scanner with fingerprint, git sources via `gitsource.py`, read record | A directory and a repository each read from fixtures; the report shows `read_at`. `python -m tools.ingest.fixlets` (`--source`, `--dir`, `--git`); records go to the untracked `index/fixlet-reads.jsonl`; template in `docs/fixlet-sources.example.csv` |
+| 6b (done 2026-10-22) | Source list, directory scanner with fingerprint, git sources via `gitsource.py`, read record | A directory and a repository each read from fixtures; the report shows `read_at`. `python -m tools.ingest.fixlets` (`--source`, `--dir`, `--git`); records go to the untracked `index/fixlet-reads.jsonl`; template in `docs/local-sources.example.csv` |
 | 6c (done 2026-10-22) | Scan for secrets, build the index with the analyzer verdict | `python -m tools.ingest.fixletbuild` (`--all`, `--source`, `--dir`, `--git`, `--dry-run`) writes `corpus/index/fixlets.sqlite` (schema v1, `tools/ingest/fixletindex.py`). A planted secret is left out and reported by file, field and rule, never by value. On the real tree: 183 clauses (37 applicability, 146 property), all parse, 3 mention an inspector the analyzer lacks, 18 carry an action-script excerpt, nothing blocked. Platform and conventions columns arrive with 6d, so this schema is provisional until then |
 | 6d (done 2026-10-22) | Convention counting with support thresholds | `tools/ingest/fixletconventions.py`; index schema v2 adds `source_group`, `platform` and a `conventions` table. Counted per group, role and platform (plus `all`), as line, `and`-part (conjunct), opening line and shape, with files, total, share and example ids. Support: 5 items and, per role, 10 percent (applicability) or 1 percent (property, which varies far more). The real index has 107 conventions. Team applicability: the proxy-agent guard is in 344 of 509 sets (67.6 percent), alone or joined to a platform test with `and` |
 | 6e (done 2026-10-22) | Tool, prompt step, resource note, README | `search_reference_fixlets` (`src/bigfix_root_mcp/reference.py`) reads `BIGFIX_FIXLET_INDEX`; results carry group, source and read time, collapse copies within a group, and come with that group's counted conventions. `BIGFIX_FIXLET_HOLDOUT` removes items for evaluations and fails closed when malformed. `write_relevance` step 2 uses it when available. Approval to return results to the model was given by the user (2026-10-22) |
@@ -772,6 +772,19 @@ and 52 credential-like assignments were kept as warnings for review. 890 habits 
 Not done, on purpose: a curated action script resource (the documentation is indexed and the
 prompts point to it, so a hand-written summary would only duplicate it and could drift), and
 any tool that runs an action script.
+
+### Source lists (2026-10-26)
+
+The private list is now `corpus/local-sources.csv`, to make plain that it is for private
+sources (a company directory or an internal repository); the tracked template is
+`docs/local-sources.example.csv`. Public repositories belong in the tracked, pinned
+`corpus/GIT_SOURCES.csv`. Two optional columns there say how a row is used: `content` (`docs`,
+the default, `fixlets`, or `docs+fixlets`) and `group`. `bigfix/CommunityContent` and
+`bigfix/content` were moved from the private list to it, with `content` set to `fixlets`
+and `group` set to `reference`, pinned at the commits that were indexed
+(`e18ba232b0a4` and `f203c874d402`), so the reference fixlet index still reads them and the
+documentation tools ignore them. `fixletbuild --all` reads both lists. The built index was not
+rebuilt: its content is unchanged.
 
 ### Source additions (2026-10-24 and 2026-10-25)
 

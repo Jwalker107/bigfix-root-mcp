@@ -51,7 +51,11 @@ from tools.ingest import bes, fetch, gitsource
 
 log = logging.getLogger("corpus.fixlets")
 
-SOURCES_PATH = fetch.REPO_CORPUS / "fixlet-sources.csv"
+# the untracked list of private sources: a company directory or an internal repository
+SOURCES_PATH = fetch.REPO_CORPUS / "local-sources.csv"
+LEGACY_SOURCES_NAME = "fixlet-sources.csv"  # its name before it was renamed
+# the tracked list of public sources; the rows that say `content=fixlets` feed this index
+PUBLIC_SOURCES_PATH = gitsource.GIT_SOURCES_PATH
 COLUMNS = ("id", "kind", "location", "branch", "commit", "subpath", "group", "notes")
 REQUIRED_COLUMNS = ("id", "kind", "location")
 KINDS = ("dir", "git")
@@ -128,6 +132,47 @@ def read_sources(path: Path) -> list[dict[str, str]]:
             raise ValueError(f"{path}: duplicate id {row['id']!r}")
         seen.add(row["id"])
     return rows
+
+
+def public_sources(path: Path = PUBLIC_SOURCES_PATH) -> list[dict[str, str]]:
+    """The public git sources that feed this index, from the tracked git sources list.
+
+    A row feeds it when its `content` says `fixlets` (or `docs+fixlets`). Each is already
+    pinned to a commit and a subpath by that list, so a read of it is reproducible.
+    """
+    if not path.exists():
+        return []
+    rows = []
+    for row in gitsource.fixlet_rows(gitsource.read_git_sources(path)):
+        converted = {
+            "id": row["id"],
+            "kind": "git",
+            "location": row["repo_url"],
+            "branch": row["branch"],
+            "commit": row["commit"],
+            "subpath": row["subpath"],
+            "group": row["group"],
+            "notes": row["notes"],
+        }
+        validate_row(converted, str(path))
+        rows.append(converted)
+    return rows
+
+
+def all_sources(
+    local_path: Path = SOURCES_PATH, public_path: Path = PUBLIC_SOURCES_PATH
+) -> list[dict[str, str]]:
+    """Every source: the private list first, then the public ones. Raises ValueError if unusable."""
+    legacy = local_path.with_name(LEGACY_SOURCES_NAME)
+    if not local_path.exists() and legacy.exists():
+        raise ValueError(f"{legacy.name} is now called {local_path.name}: rename the file")
+    local = read_sources(local_path) if local_path.exists() else []
+    public = public_sources(public_path)
+    ids = [row["id"] for row in [*local, *public]]
+    clash = sorted({i for i in ids if ids.count(i) > 1})
+    if clash:
+        raise ValueError(f"source id used in both lists: {', '.join(clash)}")
+    return [*local, *public]
 
 
 def adhoc_row(
@@ -315,7 +360,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--branch", default="", help="with --git: default is the remote's HEAD")
     parser.add_argument("--commit", default="", help="with --git: default is the branch tip now")
     parser.add_argument("--subpath", default="", help="only read below this relative path")
-    parser.add_argument("--sources", type=Path, default=SOURCES_PATH)
+    parser.add_argument("--sources", type=Path, default=SOURCES_PATH, help="the private list")
+    parser.add_argument(
+        "--public-sources",
+        type=Path,
+        default=PUBLIC_SOURCES_PATH,
+        help="the tracked list of public sources",
+    )
     parser.add_argument(
         "--raw-dir", type=Path, help="default: $BIGFIX_CORPUS_DIR/raw or corpus/raw"
     )
@@ -334,10 +385,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def _requested_row(args: argparse.Namespace) -> dict[str, str]:
     """The source the command line asks for. Raises ValueError or OSError if unusable."""
     if args.source:
-        for candidate in read_sources(args.sources):
+        for candidate in all_sources(args.sources, args.public_sources):
             if candidate["id"] == args.source:
                 return candidate
-        raise ValueError(f"no source {args.source!r} in {args.sources}")
+        raise ValueError(f"no source {args.source!r} in {args.sources.name} or the public list")
     row = adhoc_row(
         directory=args.dir,
         repo=args.git,

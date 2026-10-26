@@ -39,6 +39,14 @@ log = logging.getLogger("corpus.gitsource")
 GIT_SOURCES_PATH = fetch.REPO_CORPUS / "GIT_SOURCES.csv"
 GIT_COLUMNS = ("id", "repo_url", "branch", "commit", "subpath", "license", "pinned_on", "notes")
 REQUIRED_GIT_COLUMNS = ("id", "repo_url", "commit", "subpath")
+# optional columns. `content` says which index a row feeds, joined with `+`: `docs`
+# (the default) reads its markdown into the documentation index, `fixlets` reads its
+# .bes files into the reference fixlet index, `docs+fixlets` does both. `group` names
+# the group a fixlet source is counted with (a source without one counts alone).
+GIT_OPTIONAL_COLUMNS = ("content", "group")
+CONTENT_DOCS = "docs"
+CONTENT_FIXLETS = "fixlets"
+CONTENT_KINDS = (CONTENT_DOCS, CONTENT_FIXLETS)
 
 DEFAULT_ALLOWED_SCHEMES = ("https",)
 GIT_TIMEOUT_SECONDS = 600
@@ -68,6 +76,8 @@ def read_git_sources(path: Path) -> list[dict[str, str]]:
         rows = [{name: (row.get(name) or "").strip() for name in fieldnames} for row in reader]
     seen: set[str] = set()
     for row in rows:
+        for name in GIT_OPTIONAL_COLUMNS:
+            row.setdefault(name, "")
         _validate_row(path, row)
         if row["id"] in seen:
             raise ValueError(f"{path}: duplicate id {row['id']!r}")
@@ -81,6 +91,14 @@ def _validate_row(path: Path, row: dict[str, str]) -> None:
         raise ValueError(f"{path}: invalid id {source_id!r} (use letters, digits, . _ -)")
     if not _COMMIT_RE.match(row["commit"]):
         raise ValueError(f"{path}: {source_id}: commit must be a full 40-character lowercase SHA")
+    unknown = sorted(set(_content_tokens(row)) - set(CONTENT_KINDS))
+    if unknown:
+        raise ValueError(
+            f"{path}: {source_id}: content must be {' or '.join(CONTENT_KINDS)}, joined "
+            f"with +; got {', '.join(unknown)}"
+        )
+    if row.get("group") and not _ID_RE.match(row["group"]):
+        raise ValueError(f"{path}: {source_id}: invalid group {row['group']!r}")
     url = row["repo_url"]
     if not url or url.startswith("-") or any(ch.isspace() for ch in url):
         raise ValueError(f"{path}: {source_id}: invalid repo_url {url!r}")
@@ -94,6 +112,26 @@ def _validate_row(path: Path, row: dict[str, str]) -> None:
         or ".." in parts
     ):
         raise ValueError(f"{path}: {source_id}: subpath must be a relative path inside the repo")
+
+
+def _content_tokens(row: dict[str, str]) -> list[str]:
+    raw = (row.get("content") or "").strip()
+    return [part.strip() for part in raw.split("+") if part.strip()]
+
+
+def content_of(row: dict[str, str]) -> frozenset[str]:
+    """Which indexes a row feeds; a row that does not say feeds the documentation index."""
+    return frozenset(_content_tokens(row)) or frozenset({CONTENT_DOCS})
+
+
+def docs_rows(rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+    """The rows that feed the documentation index."""
+    return [row for row in rows if CONTENT_DOCS in content_of(row)]
+
+
+def fixlet_rows(rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+    """The rows that feed the reference fixlet index."""
+    return [row for row in rows if CONTENT_FIXLETS in content_of(row)]
 
 
 def checkout_dir(raw_dir: Path, source_id: str) -> Path:
@@ -401,7 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     raw_dir = args.raw_dir or fetch.default_raw_dir()
     results = [
         sync_git_source(row, raw_dir, dry_run=args.dry_run)
-        for row in rows
+        for row in docs_rows(rows)
         if not args.only or row["id"] in args.only
     ]
     for result in results:

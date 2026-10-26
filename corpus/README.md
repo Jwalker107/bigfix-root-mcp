@@ -6,7 +6,8 @@ Source material for the relevance knowledge index. See
 | Path | Tracked | Purpose |
 |---|---|---|
 | `MANIFEST.csv` | yes | One row per URL source: URL, license, version, dialect, SHA-256 |
-| `GIT_SOURCES.csv` | yes | One row per git source: repo, branch, pinned commit, subpath, license |
+| `GIT_SOURCES.csv` | yes | One row per public git source: repo, branch, pinned commit, subpath, license; optional `content` (`docs`, `fixlets` or `docs+fixlets`) and `group` |
+| `local-sources.csv` | **no** | Private sources for the reference fixlet index: a company directory or an internal repository |
 | `raw/` | **no** | Downloaded originals (or `$BIGFIX_CORPUS_DIR/raw`) |
 | `md/` | **no** | Converted markdown, derived |
 | `index/` | **no** | Search index, derived |

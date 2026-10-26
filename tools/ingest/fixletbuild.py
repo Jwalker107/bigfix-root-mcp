@@ -387,7 +387,15 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         metavar="N",
         help="print each group's top N conventions (company content: local console only)",
     )
-    parser.add_argument("--sources", type=Path, default=fixlets.SOURCES_PATH)
+    parser.add_argument(
+        "--sources", type=Path, default=fixlets.SOURCES_PATH, help="the private list"
+    )
+    parser.add_argument(
+        "--public-sources",
+        type=Path,
+        default=fixlets.PUBLIC_SOURCES_PATH,
+        help="the tracked list of public sources",
+    )
     parser.add_argument("--scan-allow", type=Path, default=SCAN_ALLOW_PATH)
     parser.add_argument("--out", type=Path, help="default: <corpus>/index/" + INDEX_NAME)
     parser.add_argument("--raw-dir", type=Path, help="default: $BIGFIX_CORPUS_DIR/raw")
@@ -406,13 +414,15 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def _requested_rows(args: argparse.Namespace) -> list[dict[str, str]]:
     """The sources the command line asks for. Raises ValueError or OSError if unusable."""
     if args.all or args.source:
-        listed = fixlets.read_sources(args.sources)
+        listed = fixlets.all_sources(args.sources, args.public_sources)
         if args.all:
+            if not listed:
+                raise ValueError(f"no sources to read: list them in {args.sources.name}")
             return listed
         by_id = {row["id"]: row for row in listed}
         unknown = [name for name in args.source if name not in by_id]
         if unknown:
-            raise ValueError(f"no such source in {args.sources}: {', '.join(unknown)}")
+            raise ValueError(f"no such source: {', '.join(unknown)}")
         return [by_id[name] for name in args.source]
     row = fixlets.adhoc_row(
         directory=args.dir,

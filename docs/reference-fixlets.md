@@ -86,11 +86,14 @@ a URL and an `Authorization: Bearer` or `Basic` header, and warns about a litera
 Copy the template and edit the copy:
 
 ```
-copy docs\fixlet-sources.example.csv corpus\fixlet-sources.csv
+cp docs/local-sources.example.csv corpus/local-sources.csv
 ```
 
-`corpus/fixlet-sources.csv` is ignored by git, because a company path or an internal
-repository URL is itself internal. The columns:
+`corpus/local-sources.csv` is ignored by git, because a company path or an internal
+repository URL is itself internal. It is the list for **private** sources. A **public**
+repository goes in the tracked `corpus/GIT_SOURCES.csv` instead (see "Public sources"
+below), so anyone with a clone can read the same thing. `fixletbuild --all` reads both
+lists. The columns of `local-sources.csv`:
 
 | Column | Meaning |
 | --- | --- |
@@ -113,6 +116,24 @@ jgstew-bigfix-content,git,https://github.com/jgstew/bigfix-content,,,,reference,
 ```
 
 Use forward slashes in Windows paths (`C:/path/to/folder`).
+
+### Public sources
+
+A public repository belongs in `corpus/GIT_SOURCES.csv`, the tracked list that the
+documentation index also uses. It must be pinned: a full 40-character `commit` (find it with
+`git ls-remote <url> <branch>`) and a `subpath` (use `.` for the whole repository). Two
+optional columns say how it is used:
+
+| Column | Meaning |
+| --- | --- |
+| `content` | `docs` (the default: its markdown goes into the documentation index), `fixlets` (its `.bes` files go into this index) or `docs+fixlets` for both |
+| `group` | The group it is counted with, as in the private list. Blank means it counts alone |
+
+For example, the two public example repositories read here are listed as
+`bigfix-community-content` and `bigfix-content` with `content` set to `fixlets` and `group`
+set to `reference`. Their checkouts are kept under `corpus/raw/fixlets/<id>/`, and reading
+them works like any other source: `python -m tools.ingest.fixlets --source <id>`. The
+documentation tools (`gitsource`, `build`) skip a row that does not say `docs`.
 
 ## Step 2: read each source and check it
 
@@ -322,8 +343,9 @@ results, and the same ids the question collector writes.
 
 | Path | Tracked? | Purpose |
 | --- | --- | --- |
-| `docs/fixlet-sources.example.csv` | yes | The template |
-| `corpus/fixlet-sources.csv` | no | Your sources |
+| `docs/local-sources.example.csv` | yes | The template for the private list |
+| `corpus/local-sources.csv` | no | Your private sources |
+| `corpus/GIT_SOURCES.csv` | yes | Public git sources, pinned; rows with `content` set to `fixlets` feed this index |
 | `corpus/raw/fixlets/<id>/` | no | Checkouts of git sources |
 | `corpus/index/fixlets.sqlite` | no | The index |
 | `corpus/index/fixlet-reads.jsonl` | no | The record of every read |

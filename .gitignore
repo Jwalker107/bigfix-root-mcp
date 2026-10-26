@@ -161,8 +161,8 @@ corpus/index/
 corpus/eval/
 # this team's own relevance conventions (see docs/relevance-conventions.example.md)
 corpus/conventions.md
-# reference-fixlet sources: a company repository's URL or path is internal
-corpus/fixlet-sources.csv
+# private sources (a company directory or an internal repository): the URL or path is internal
+corpus/local-sources.csv
 
 # Environments
 .env

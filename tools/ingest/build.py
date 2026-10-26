@@ -516,7 +516,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.error("--max-chunk-chars must be at least %d", MIN_CHUNK_CHARS)
         return EXIT_USAGE
     try:
-        git_rows = gitsource.read_git_sources(args.git_sources) if args.git_sources.exists() else []
+        git_rows = (
+            gitsource.docs_rows(gitsource.read_git_sources(args.git_sources))
+            if args.git_sources.exists()
+            else []
+        )
         _, url_rows = fetch.read_manifest(args.manifest)
         allowed = scan.read_allowlist(args.scan_allow)
     except (OSError, ValueError) as err:

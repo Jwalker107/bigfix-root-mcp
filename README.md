@@ -235,22 +235,34 @@ without restarting the server.
 
 | To add | Edit | Then run |
 | --- | --- | --- |
-| A directory of `.bes` files (a fixlet path) | a row in `corpus/fixlet-sources.csv` | `fixlets`, then `fixletbuild` |
-| A git repository of `.bes` files | a row in `corpus/fixlet-sources.csv` | `fixlets`, then `fixletbuild` |
+| A directory of `.bes` files (a fixlet path) | a row in `corpus/local-sources.csv` (private) | `fixlets`, then `fixletbuild` |
+| A private git repository of `.bes` files | a row in `corpus/local-sources.csv` (private) | `fixlets`, then `fixletbuild` |
+| A **public** git repository of `.bes` files | a row in `corpus/GIT_SOURCES.csv` with `content` set to `fixlets` | `fixlets`, then `fixletbuild` |
 
-The source list is `corpus/fixlet-sources.csv`, which is ignored by git because a company
-path or an internal repository URL is itself internal. Copy the template and edit it:
+There are two source lists. **Private sources** go in `corpus/local-sources.csv`, which is
+ignored by git because a company path or an internal repository URL is itself internal.
+**Public sources** go in the tracked `corpus/GIT_SOURCES.csv`, the same list the
+documentation index uses, pinned to a commit. Its optional `content` column says which index
+a row feeds (`docs`, the default, `fixlets`, or `docs+fixlets`) and its optional `group`
+column names the group. `fixletbuild --all` reads both lists. Copy the template for the
+private list and edit it:
 
 ```
-cp docs/fixlet-sources.example.csv corpus/fixlet-sources.csv
+cp docs/local-sources.example.csv corpus/local-sources.csv
 ```
 
-The columns are `id, kind, location, branch, commit, subpath, group, notes`:
+The columns of `local-sources.csv` are `id, kind, location, branch, commit, subpath, group, notes`:
 
 ```
 team-fixlets,dir,C:/path/to/bes-files,,,,team,a working tree
 team-repo,git,https://git.example.com/org/repo.git,main,,content/fixlets,team,internal repository
-public-repo,git,https://github.com/example/public-content,,,,reference,a public repository
+```
+
+A public repository goes in `corpus/GIT_SOURCES.csv` with a full 40-character `commit`, a
+`subpath` (`.` for the whole repository), and the two optional columns:
+
+```
+public-repo,https://github.com/example/public-content,,0123456789abcdef0123456789abcdef01234567,.,MIT,2026-10-26,example content,fixlets,reference
 ```
 
 - A **directory** is read in place and never modified. Every `.bes` file under it is found,
@@ -313,7 +325,7 @@ Environment variables win over config files:
 | qna auto-discovery | `BIGFIX_QNA_AUTO_DISCOVERY`: `0` to never discover hosts, on first run or when asked | on |
 | qna containers | `BIGFIX_QNA_CONTAINERS`: `0` to forbid container-image targets | on |
 | Knowledge index | `BIGFIX_KNOWLEDGE_INDEX`: path to the `relevance.sqlite` built by `python -m tools.ingest.build` (see [docs/knowledge-retrieval-plan.md](docs/knowledge-retrieval-plan.md)). Read-only; read on every call, so a rebuilt index is picked up without a restart. An index and a server must agree on the schema version, and a mismatch is reported (rebuild the index, or restart after upgrading the server) | unset (`search_relevance_docs` reports it is unavailable) |
-| Reference fixlet index | `BIGFIX_FIXLET_INDEX`: path to the `fixlets.sqlite` built by `python -m tools.ingest.fixletbuild` from the sources in the untracked `corpus/fixlet-sources.csv` (template: [docs/fixlet-sources.example.csv](docs/fixlet-sources.example.csv)). Step-by-step build instructions for a directory, a backup export and a git repository (the public `jgstew/bigfix-content`, as the example of reading an internal one) are in [docs/reference-fixlets.md](docs/reference-fixlets.md). Company content, so it is never tracked or packaged. Read-only; read on every call. Optional `BIGFIX_FIXLET_HOLDOUT` (comma-separated item ids) removes those items from every search, for evaluations. |
+| Reference fixlet index | `BIGFIX_FIXLET_INDEX`: path to the `fixlets.sqlite` built by `python -m tools.ingest.fixletbuild` from the sources in the untracked `corpus/local-sources.csv` (template: [docs/local-sources.example.csv](docs/local-sources.example.csv)) and the public rows of `corpus/GIT_SOURCES.csv`. Step-by-step build instructions for a directory, a backup export and a git repository (the public `jgstew/bigfix-content`, as the example of reading an internal one) are in [docs/reference-fixlets.md](docs/reference-fixlets.md). Company content, so it is never tracked or packaged. Read-only; read on every call. Optional `BIGFIX_FIXLET_HOLDOUT` (comma-separated item ids) removes those items from every search, for evaluations. |
 | Relevance conventions | `BIGFIX_RELEVANCE_CONVENTIONS`: path to a markdown file of your team's relevance conventions, added to the `write_relevance` prompt as instructions. Read on every call; capped at 64 KB (8,000 characters reach the prompt); set but unreadable is reported in the prompt, not ignored | unset (no conventions) |
 | Transport | `BIGFIX_MCP_TRANSPORT`: `stdio` or `http` (streamable HTTP on 127.0.0.1:8000/mcp, banner on). No auth layer of its own - put authentication in front before binding beyond localhost. | `stdio` |
 
