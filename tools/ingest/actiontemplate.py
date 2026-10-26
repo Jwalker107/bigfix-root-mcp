@@ -9,13 +9,20 @@ A template keeps the script as written but replaces each substitution with the g
 marker `{<relevance>}`, so scripts that differ only in what they substitute look alike,
 and the substitutions are returned separately so the analyzer can check each one.
 
-Brace rules, as used by the team's own content:
+Brace rules, from the vendor's action script guide ("Using Substitution"):
 
-  {expr}   a substitution. It ends at the first single `}`.
+  {expr}   a substitution. It ends at the first single `}`, even inside a string.
   {}       with nothing inside, plain text: there is no relevance to evaluate.
-  {{ }}    a literal brace. Inside a substitution, `}}` is a literal `}` (so a string
-           such as "\\:{ScanTrigger:OnAccess}}" does not end the substitution early).
-           Escapes are kept as written in the template, so a copy stays valid.
+  {{       outside a substitution, one literal `{`. This is the only escape there: a
+           single `}` outside a substitution is already a literal `}`, and `}}` outside
+           one is two ordinary characters, not an escape.
+  }}       inside a substitution only, one literal `}`, so that a string such as
+           "\\:{ScanTrigger:OnAccess}}" does not end the substitution early. A `{` inside a
+           substitution is an ordinary character.
+
+Writing `}}` for a closing brace in a script (as in a PowerShell block) therefore puts
+two braces in the file; double only the left braces. The template keeps every escape as
+written, so a copy stays valid.
 
 A substitution that never closes makes the script *ambiguous*: the template is the
 script unchanged, no substitutions are reported, and nothing is guessed.
@@ -64,9 +71,6 @@ def parse(script: str) -> Template:
         char = script[i]
         if char == "{" and script.startswith("{{", i):
             out.append("{{")
-            i += 2
-        elif char == "}" and script.startswith("}}", i):
-            out.append("}}")
             i += 2
         elif char == "{":
             expression: list[str] = []

@@ -59,8 +59,9 @@ For each fixlet, task and analysis the build keeps three kinds of row:
 
 A template is the script as written, with each relevance substitution `{...}` replaced by
 the marker `{<relevance>}`; the relevance of each substitution is stored separately, in
-order, and checked with the analyzer like any other relevance. `{{` and `}}` are literal
-braces and are kept as written. A script also records its MIME type, its success criteria
+order, and checked with the analyzer like any other relevance. Brace escapes are kept as
+written: outside a substitution `{{` is one literal `{` and a single `}` is already literal;
+inside a substitution `}}` is one literal `}`. A script also records its MIME type, its success criteria
 option and the `parameter` names it declares. A script with a substitution that cannot be
 split cleanly is marked ambiguous: it is stored unchanged, with no substitutions and no
 verdict, rather than guessed at.

@@ -97,9 +97,10 @@ _NOTE = (
     "house conventions state outranks them. Each group is counted on its own and groups "
     "are never pooled; a group that is not your team's is a reference, not your rule. "
     "An `actionscript` result is a template to read, never to run: `{<relevance>}` stands "
-    "for a relevance substitution (listed in `substitutions`), `{{` and `}}` are literal "
-    "braces, and `parses` is the analyzer's verdict on those substitutions only (absent "
-    "when there are none). `template_chars_total` says how much was cut."
+    "for a relevance substitution (listed in `substitutions`), `{{` outside a substitution "
+    "is one literal `{` (a single `}` there is already literal; inside a substitution a "
+    "literal `}` is written `}}`), and `parses` is the analyzer's verdict on those "
+    "substitutions only (absent when there are none). `template_chars_total` says how much was cut."
 )
 
 _HOW_TO_ENABLE = (

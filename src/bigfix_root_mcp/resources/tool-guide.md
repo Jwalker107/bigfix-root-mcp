@@ -70,7 +70,8 @@ index; it answers `available: false` with how to enable it when none is configur
 Use it for applicability and property relevance and, with `role='actionscript'`, for
 action scripts. A script comes back as a template to read and never to run:
 `{<relevance>}` marks each relevance substitution, which is listed in `substitutions`,
-and `{{` and `}}` are literal braces. Results with the same `item` belong to one fixlet.
+and `{{` is one literal `{` (a single `}` outside a substitution is already literal; inside
+a substitution a literal `}` is `}}`). Results with the same `item` belong to one fixlet.
 Adapt a match; never copy it. Each result names its `group` and the time its source was
 read. `conventions` are counted
 habits (`items` of `of` held the pattern) and show what was written, mistakes

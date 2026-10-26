@@ -127,7 +127,8 @@ keeping:
   `{relevance}` substitutions, so a template replaces each with `{<relevance>}` and keeps
   the expressions separately, where the analyzer can check them. Scripts that differ only
   in what they substitute then look alike, which is what makes counted habits meaningful.
-  Brace escapes (`{{`, `}}`) are kept as written so a copy stays valid, and a script with an
+  Brace escapes are kept as written so a copy stays valid (outside a substitution `{{` is one
+  `{` and a single `}` is already literal; inside one, `}}` is one `}`), and a script with an
   unclosed substitution is stored unchanged and marked, never repaired by guesswork.
 - **`createfile` bodies are searchable but are not habits.** The text of a file a script
   writes is in the template, so a search for a PowerShell cmdlet finds it, but only the

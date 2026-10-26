@@ -770,6 +770,21 @@ and 52 credential-like assignments were kept as warnings for review. 890 habits 
 (760 for scripts). On the team group the commonest commands are `action`, `delete` and
 `waithidden`; `waithidden` is in 96.7 percent of reference scripts.
 
+Correction (2026-10-26): the brace rule was first written wrongly. Comparing two generated
+PHP Fixlets showed it: the vendor's action script guide ("Using Substitution") says that
+outside a substitution `{{` is one literal `{` and a single `}` is already a literal `}`,
+while inside a substitution a literal `}` is `}}` and an undoubled `}` ends the
+substitution even inside a string. The prompts, the search note, the shipped guide and the
+docs had said that `}}` is a literal brace everywhere, which led one generated Fixlet to
+double every closing brace of its PowerShell (about 77 of them; it parses with 85 errors
+once emitted that way) and the other to write `{"}"}` (72 substitutions that do not parse).
+A survey of 2,862 lines with `{{` in real action scripts found 1,549 closed by a single `}`
+and 10 by `}}`. The wording is corrected in every place above and guarded by
+`tests/test_brace_rules.py`, which uses the guide's own examples. The reader code was
+already right (it kept escapes as written), so the splitting of all 17,195 indexed scripts
+is unchanged (checked by digest) and no index needed rebuilding. The prompt now also tells
+the model to search the documentation for "using substitution" before writing a brace.
+
 Not done, on purpose: a curated action script resource (the documentation is indexed and the
 prompts point to it, so a hand-written summary would only duplicate it and could drift), and
 any tool that runs an action script.
