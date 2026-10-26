@@ -13,10 +13,14 @@ size so a wrong path cannot flood a prompt. Unset means no conventions; set but
 unreadable is reported in the prompt instead of being ignored, because a rule
 that silently stopped applying is worse than a visible problem.
 
+HTML comments (`<!-- ... -->`) are for the people editing the file, such as a note saying
+the file is an editable default; they are removed before the text is sent.
+
 This module must not import fastmcp (same layering rule as analysis.py).
 """
 
 import os
+import re
 from pathlib import Path
 
 CONVENTIONS_ENV = "BIGFIX_RELEVANCE_CONVENTIONS"
@@ -24,6 +28,8 @@ CONVENTIONS_ENV = "BIGFIX_RELEVANCE_CONVENTIONS"
 MAX_FILE_BYTES = 64 * 1024
 # what reaches the prompt; the rest is cut and the cut is said out loud
 MAX_PROMPT_CHARS = 8000
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_BLANK_RUNS = re.compile(r"\n{3,}")
 
 
 def load() -> tuple[str, str]:
@@ -42,9 +48,10 @@ def load() -> tuple[str, str]:
         size = path.stat().st_size
         if size > MAX_FILE_BYTES:
             return "", f"the conventions file {path} is {size} bytes; the limit is {MAX_FILE_BYTES}"
-        text = path.read_text(encoding="utf-8").strip()
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
         return "", f"the conventions file {path} could not be read ({type(err).__name__})"
+    text = _BLANK_RUNS.sub("\n\n", _COMMENT.sub("", text)).strip()
     if len(text) > MAX_PROMPT_CHARS:
         text = (
             text[:MAX_PROMPT_CHARS].rstrip()

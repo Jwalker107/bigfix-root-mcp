@@ -7,7 +7,7 @@ Source material for the relevance knowledge index. See
 |---|---|---|
 | `MANIFEST.csv` | yes | One row per URL source: URL, license, version, dialect, SHA-256 |
 | `GIT_SOURCES.csv` | yes | One row per public git source: repo, branch, pinned commit, subpath, license; optional `content` (`docs`, `fixlets` or `docs+fixlets`) and `group` |
-| `conventions.md` | yes | House relevance conventions, a starting point for `BIGFIX_RELEVANCE_CONVENTIONS` (see the README); edit it for your own team |
+| `conventions.md` | yes | House relevance conventions: an editable default and a starting point for `BIGFIX_RELEVANCE_CONVENTIONS` (see the README); edit it for your own team |
 | `local-sources.csv` | **no** | Private sources for the reference fixlet index: a company directory or an internal repository |
 | `raw/` | **no** | Downloaded originals (or `$BIGFIX_CORPUS_DIR/raw`) |
 | `md/` | **no** | Converted markdown, derived |

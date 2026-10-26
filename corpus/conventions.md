@@ -1,7 +1,15 @@
+<!--
+This is an editable default, not a fixed rule set. Change it, add to it or delete it to fit
+your team, and point BIGFIX_RELEVANCE_CONVENTIONS at your copy. Everything outside comments
+like this one is added to the write_relevance, write_actionscript and write_fixlet prompts
+as instructions on every call, so an edit takes effect without a restart. Comments are for
+people and are never sent.
+-->
+
 # House relevance conventions
 
-These are this team's rules for writing relevance. Follow them unless the request
-says otherwise, and say which one you set aside.
+These are the house rules for writing relevance. Follow them unless the request says
+otherwise, and say which one you set aside.
 
 ## Proxy agents
 
