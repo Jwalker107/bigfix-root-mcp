@@ -288,7 +288,8 @@ Built, with tests in `tests/test_write_relevance.py` and `tests/test_resources.p
   prompt as instructions. The shipped prompt contains no team rule (tested). The
   proxy-agent default the user set is therefore carried by a conventions file, not
   by the public package: `docs/relevance-conventions.example.md` is the generic
-  template, and the user's own file is `corpus/conventions.md` (untracked). To use
+  template, and the user's own file is `corpus/conventions.md` (tracked since 2026-10-26, as a
+  starting point for customers). To use
   it, set `BIGFIX_RELEVANCE_CONVENTIONS` to that path in the MCP client's server
   entry. An evaluation run must set it too, or the default is not applied.
 - **Two curated resources**, written from the documentation in our own words:

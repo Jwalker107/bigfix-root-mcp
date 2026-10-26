@@ -116,7 +116,9 @@ content), check names with `search_inspectors`, draft,
 `analyze_relevance`, evaluate with a bounded query, and report only what was
 verified. If `BIGFIX_RELEVANCE_CONVENTIONS` names a markdown file, its text is
 added as house conventions (how your team treats proxy agents, guard idioms, and
-so on); a starting point is in
+so on). Two starting points are tracked: [corpus/conventions.md](corpus/conventions.md), a
+working file (it excludes proxy agent contexts by default) that you can point the variable at
+as it is or copy and edit, and the commented template
 [docs/relevance-conventions.example.md](docs/relevance-conventions.example.md).
 
 `write_actionscript(goal, platform)` does the same for an action script: look up the

@@ -78,7 +78,9 @@ authoring resources. Choices worth keeping:
   and differs between teams. A file named by `BIGFIX_RELEVANCE_CONVENTIONS` is
   added to the prompt as instructions; the shipped prompt contains none, and a test
   checks that. The path is the operator's, never a caller's, and the file is read
-  on every call and size-capped.
+  on every call and size-capped. `corpus/conventions.md` is tracked as a starting point
+  for customers, but it is still only configuration: the server reads it when, and only
+  when, `BIGFIX_RELEVANCE_CONVENTIONS` names it.
 - **A conventions file that cannot be read is said so in the prompt.** A rule that
   silently stopped applying is worse than a visible problem.
 - **Examples in the shipped resources are checked by the analyzer.** The same
