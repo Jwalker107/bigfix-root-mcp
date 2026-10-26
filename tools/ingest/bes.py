@@ -17,8 +17,9 @@ Safety, because these files may be confidential and are never trusted:
     link cannot lead the walk outside the directory it was given;
   - one file that is not valid XML is recorded and skipped, never fatal.
 
-Action scripts are read only when asked for (actions=True), because they are where
-credentials and internal hostnames most often sit; the question collector never asks.
+Action scripts (the <DefaultAction> and <Action> of a Fixlet or Task) are read only
+when asked for (actions=True), because they are where credentials and internal
+hostnames most often sit; the question collector never asks.
 """
 
 import hashlib
@@ -32,8 +33,10 @@ from lxml import etree
 from tools.ingest import convert
 
 DESCRIPTION_CHARS = 600
-# how much of one action script is kept: enough to say what the item does
+# how much of one action script is kept as purpose text in a search hit
 ACTION_CHARS = 1500
+# the most of one action script that is read at all; a longer one is cut and flagged
+SCRIPT_CHARS = 64 * 1024
 # directories that hold tooling or dependencies, never content worth reading
 SKIP_DIRS = frozenset({".git", "node_modules", "site-packages", "__pycache__", ".venv", "venv"})
 KINDS = ("Fixlet", "Task", "Analysis")
@@ -48,13 +51,26 @@ class Statement:
 
 
 @dataclass
+class Action:
+    """One <DefaultAction> or <Action> of a Fixlet or Task."""
+
+    kind: str  # 'default' or 'action'
+    action_id: str
+    mime_type: str
+    script: str  # the action script, cut at SCRIPT_CHARS
+    truncated: bool = False
+    # the SuccessCriteria option: OriginalRelevance, CustomRelevance, ... or '' when absent
+    success_criteria: str = ""
+
+
+@dataclass
 class Item:
     kind: str  # Fixlet, Task or Analysis
     title: str
     description: str
     path: str  # relative to the source directory, posix separators
     statements: list[Statement] = field(default_factory=list)
-    actions: list[str] = field(default_factory=list)  # action script text, only if asked for
+    actions: list[Action] = field(default_factory=list)  # only if asked for
 
 
 @dataclass
@@ -100,13 +116,39 @@ def content_id(kind: str, title: str, role: str, statements: list[Statement]) ->
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
-def _action_scripts(element: etree._Element) -> list[str]:
-    scripts = []
-    for script in element.iter("ActionScript"):
-        text = _text(script)
-        if text:
-            scripts.append(text[:ACTION_CHARS])
-    return scripts
+def item_id(item: Item) -> str:
+    """A short id for the item as a whole, shared by its relevance and its actions.
+
+    Built from the kind, the title and the applicability lines, so an analysis's
+    properties and a fixlet's actions all carry the id of the item they belong to. That
+    is what lets an evaluation hold out everything about the item a question came from.
+    """
+    lines = [s.relevance for s in item.statements if s.role == "applicability"]
+    parts = (item.kind, item.title, *lines)
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+def _actions(element: etree._Element) -> list[Action]:
+    """The default action first, then the others, each with a non-empty script."""
+    found = []
+    for tag, kind in (("DefaultAction", "default"), ("Action", "action")):
+        for action in element.findall(tag):
+            script = action.find("ActionScript")
+            text = _text(script)
+            if script is None or not text:
+                continue
+            criteria = action.find("SuccessCriteria")
+            found.append(
+                Action(
+                    kind=kind,
+                    action_id=_text(action.find("ID")),
+                    mime_type=script.get("MIMEType", ""),
+                    script=text[:SCRIPT_CHARS],
+                    truncated=len(text) > SCRIPT_CHARS,
+                    success_criteria="" if criteria is None else criteria.get("Option", ""),
+                )
+            )
+    return found
 
 
 def parse_bes(data: bytes, path: str, *, actions: bool = False) -> list[Item]:
@@ -135,7 +177,7 @@ def parse_bes(data: bytes, path: str, *, actions: bool = False) -> list[Item]:
                 if _text(prop)
             ]
         if actions and kind != "Analysis":
-            item.actions = _action_scripts(element)
+            item.actions = _actions(element)
         if item.statements:
             items.append(item)
     return items

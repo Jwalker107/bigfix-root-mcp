@@ -139,7 +139,9 @@ class TestSearch:
         assert titles(result)[0] == "Add Defender exclusion"
 
     def test_a_result_carries_what_a_model_needs(self, index_path):
-        top = reference.search("defender exclusion", group="team")["results"][0]
+        top = reference.search("defender exclusion", group="team", role="applicability")["results"][
+            0
+        ]
         assert top["role"] == "applicability"
         assert top["platform"] == "windows"
         assert top["group"] == "team"
@@ -162,7 +164,7 @@ class TestSearch:
         assert reference.search("defender", role="property")["results"] == []
 
     def test_platform_keeps_that_platform_and_the_unclear(self, index_path):
-        mac = reference.search("scan", platform="mac")["results"]
+        mac = reference.search("scan", platform="mac", role="applicability")["results"]
         assert [r["platform"] for r in mac] == ["mac"]
         assert reference.search("defender", platform="mac")["results"] == []
 
@@ -217,12 +219,12 @@ class TestDuplicates:
 
     def test_copies_in_one_group_collapse_to_one_result(self, tmp_path, monkeypatch):
         self.build(tmp_path, monkeypatch, ["team", "team", "team"])
-        (only,) = reference.search("same thing")["results"]
+        (only,) = reference.search("same thing", role="applicability")["results"]
         assert only["copies"] == 3
 
     def test_the_same_item_in_two_groups_is_reported_by_each(self, tmp_path, monkeypatch):
         self.build(tmp_path, monkeypatch, ["team", "reference"])
-        results = reference.search("same thing")["results"]
+        results = reference.search("same thing", role="applicability")["results"]
         assert sorted(r["group"] for r in results) == ["reference", "team"]
         assert all("copies" not in r for r in results)
 
@@ -306,7 +308,7 @@ class TestWhatIsWithheld:
         path = tmp_path / "big.sqlite"
         fixletindex.write_index(path, built.data)
         monkeypatch.setenv(reference.INDEX_ENV, str(path))
-        (top,) = reference.search("big one")["results"]
+        (top,) = reference.search("big one", role="applicability")["results"]
         assert len(top["relevance"]) == reference.RELEVANCE_LINES
         assert top["relevance_lines_total"] == 15
         assert all(len(line) <= reference.RELEVANCE_LINE_CHARS + 4 for line in top["relevance"])

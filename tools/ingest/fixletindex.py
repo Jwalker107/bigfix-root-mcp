@@ -4,7 +4,7 @@ This is company content, so it is kept apart from the documentation index
 (relevance.sqlite): a separate file, never tracked, never packaged, never meant to be
 distributed. The file says so in its own meta table.
 
-Schema version 2:
+Schema version 3:
 
   meta     key/value: schema_version, built_at (UTC), sqlite_version, counts,
            analyzer_version, and `confidential`.
@@ -18,12 +18,23 @@ Schema version 2:
                             newlines in `relevance_text`, which is what the full-text
                             index reads.
              property      an Analysis property, one row each, with its name.
+             actionscript  one action of a Fixlet or Task (its <DefaultAction> or
+                            <Action>), as a template: the script with each relevance
+                            substitution replaced by `{<relevance>}`. `relevance` holds
+                            the script's own command lines (file blocks collapsed, plus
+                            `@mime` and `@success` metadata lines) which is what
+                            conventions are counted from; `relevance_text` and `template`
+                            hold the whole template; `substitutions` the relevance of each
+                            substitution, in order; `parameters` the parameter names;
+                            `parses` is the analyzer's verdict on the substitutions.
            Each carries the purpose text (title, file name, description, an excerpt of
            the action script), the analyzer's verdict (parses, parse_error,
            unknown_inspectors) and `excluded`: a JSON array naming any purpose field
            that was left out because the secret scan found a credential in it.
            `content_id` is the same id the question collector gives an item, so a
-           question's own source can be held out of an evaluation. `platform` is
+           question's own source can be held out of an evaluation. `item_id` names
+           the item as a whole, shared by its relevance and its actions, so holding
+           an item out removes all of it. `platform` is
            windows, mac, unix, multi or none, from the item's own operating-system test.
   conventions
            counted habits per (source_group, role, platform): a line, a top-level
@@ -49,10 +60,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
-ROLES = ("applicability", "property")
+ROLES = ("applicability", "property", "actionscript")
 DIALECTS = ("session", "client", "both", "unknown")
+# the number of columns written for each clause (the INSERT below names them)
+_CLAUSE_COLUMNS = 26
 CONFIDENTIAL_NOTE = "company reference content: do not distribute or commit"
 
 _SCHEMA = """
@@ -80,8 +93,16 @@ CREATE TABLE clauses (
     file_name TEXT NOT NULL,
     content_id TEXT NOT NULL,
     item_kind TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('applicability', 'property')),
+    role TEXT NOT NULL CHECK (role IN ('applicability', 'property', 'actionscript')),
     platform TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    success_criteria TEXT NOT NULL,
+    template TEXT NOT NULL,
+    substitutions TEXT NOT NULL,
+    parameters TEXT NOT NULL,
+    script_truncated INTEGER NOT NULL CHECK (script_truncated IN (0, 1)),
     property_name TEXT NOT NULL,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
@@ -97,9 +118,9 @@ CREATE TABLE clauses (
 CREATE TABLE conventions (
     id INTEGER PRIMARY KEY,
     source_group TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('applicability', 'property')),
+    role TEXT NOT NULL CHECK (role IN ('applicability', 'property', 'actionscript')),
     platform TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('line', 'conjunct', 'opening', 'shape')),
+    kind TEXT NOT NULL CHECK (kind IN ('line', 'conjunct', 'command', 'opening', 'shape')),
     pattern TEXT NOT NULL,
     files INTEGER NOT NULL,
     total INTEGER NOT NULL,
@@ -107,6 +128,7 @@ CREATE TABLE conventions (
     examples TEXT NOT NULL
 );
 CREATE INDEX clauses_by_source ON clauses(source_id);
+CREATE INDEX clauses_by_item ON clauses(item_id);
 CREATE INDEX clauses_by_platform ON clauses(role, platform);
 CREATE INDEX conventions_by_cell ON conventions(source_group, role, platform);
 CREATE INDEX clauses_by_content ON clauses(content_id);
@@ -148,6 +170,7 @@ class ClauseRow:
     description: str
     action_excerpt: str
     relevance: tuple[str, ...]
+    item_id: str = ""
     platform: str = "none"
     dialect: str = "client"
     # the analyzer's verdict; None means it was not analysed
@@ -156,6 +179,14 @@ class ClauseRow:
     unknown_inspectors: tuple[str, ...] = ()
     # purpose fields left out because the secret scan found a credential in them
     excluded: tuple[str, ...] = ()
+    # action scripts only (role 'actionscript'); blank for relevance
+    action_id: str = ""
+    mime_type: str = ""
+    success_criteria: str = ""
+    template: str = ""
+    substitutions: tuple[str, ...] = ()
+    parameters: tuple[str, ...] = ()
+    script_truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -220,9 +251,11 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
         )
         connection.executemany(
             "INSERT INTO clauses (source_id, path, file_name, content_id, item_kind, role,"
-            " platform, property_name, title, description, action_excerpt, relevance,"
-            " relevance_text, dialect, parses, parse_error, unknown_inspectors, excluded)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " platform, item_id, action_id, mime_type, success_criteria, template,"
+            " substitutions, parameters, script_truncated, property_name, title,"
+            " description, action_excerpt, relevance, relevance_text, dialect, parses,"
+            " parse_error, unknown_inspectors, excluded)"
+            f" VALUES ({', '.join('?' * _CLAUSE_COLUMNS)})",
             [
                 (
                     c.source_id,
@@ -232,12 +265,20 @@ def write_index(path: Path, data: FixletIndexData, *, built_at: datetime | None 
                     c.item_kind,
                     c.role,
                     c.platform,
+                    c.item_id,
+                    c.action_id,
+                    c.mime_type,
+                    c.success_criteria,
+                    c.template,
+                    json.dumps(c.substitutions),
+                    json.dumps(c.parameters),
+                    int(c.script_truncated),
                     c.property_name,
                     c.title,
                     c.description,
                     c.action_excerpt,
                     json.dumps(c.relevance),
-                    "\n".join(c.relevance),
+                    c.template or "\n".join(c.relevance),
                     c.dialect,
                     None if c.parses is None else int(c.parses),
                     c.parse_error,

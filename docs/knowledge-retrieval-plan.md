@@ -22,6 +22,7 @@ is reported.
 | 5. Evaluation | In progress: analyzer pass, the four index changes, golden-set selection and retrieval mechanics done (Phase 5a). Live answer checks deferred by the user (2026-10-22). Phase 5b has started: 25 questions from the team's own BES content are approved (more wanted) |
 | 6. Reference fixlets | Done (2026-10-22): 6a to 6f. `search_reference_fixlets` over a separate, untracked, company-content index; how to build it: [reference-fixlets.md](reference-fixlets.md). Private repositories are untested |
 | 7. Docs and CI | Not started |
+| 8. Action scripts | Done (2026-10-24): templates and counted habits in the reference index, the action script documentation as a source, `write_actionscript` and `write_fixlet`, README instructions for every kind of source |
 
 ## Decisions
 
@@ -731,6 +732,92 @@ group a result came from. The source list gets a `group` column for this in 6d.
 - CI job for ingest unit tests using fixtures only (no network).
 - Confirm the index and raw files never land in the wheel.
 
+### Phase 8: Action scripts (done 2026-10-24)
+
+Goal: keep action scripts, their templates and their habits, alongside relevance, and
+give a model separate prompts for writing relevance, an action script, and a Fixlet that
+joins the two.
+
+Sizing, measured before building (aggregates over the three configured sources): 7,100
+scripts in the reference group (median 386 characters, longest 43,905; 5.4 MB) and 474 in
+the team group (median 799, 90th percentile 10,248, longest 51,710; 1.4 MB). Nearly all are
+Windows shell action scripts; most carry `{relevance}` substitutions (99 percent and 82
+percent) and 12 and 55 percent declare `parameter` lines. Most reference scripts are
+auto-generated uninstall tasks, which is why habits are counted per group.
+
+Decisions (confirmed by the user 2026-10-24, "proceed with your assumptions"): bounded
+template, not whole scripts, in a search hit (3,000 characters, total stated); the action
+script documentation added as a source; templates are the script with substitutions and
+`parameter` lines normalized; three separate prompts.
+
+| Step | Work | Result |
+|---|---|---|
+| 8a | `bes.py` reads `DefaultAction` and `Action` with id, MIME type, success criteria option and the script (to 64 KB, flagged when cut); `item_id` shared by an item's rows | The earlier sizing missed `DefaultAction` (it counted 8 reference items with an action instead of 7,096); both are read now |
+| 8b | `tools/ingest/actiontemplate.py`: substitutions to `{<relevance>}`, brace escapes kept, ambiguous scripts left unchanged, parameters, command lines with `createfile` blocks collapsed. Empty `{}` is text | |
+| 8c | Index schema v3: role `actionscript`, `item_id`, `template`, `substitutions`, `parameters`, MIME type, success criteria, cut flag; convention kind `command` | Rebuilt, not migrated |
+| 8d | Build: one row per action, substitutions analysed, synthetic `@mime`, `@success`, `@parameterized` lines so whole-action habits are counted; full-length secret scan (a hit drops the row); three new scan rules (password in a URL, authorization header, literal password argument) | |
+| 8e | `search_reference_fixlets`: `role='actionscript'`, bounded template and substitutions, `item` link, item-level hold-out, `command` and `opening` habits | |
+| 8f | Prompts `write_actionscript` and `write_fixlet`; `write_relevance` unchanged; tool guide, README, design notes | |
+| 8g | The action script documentation (`site/pages/action-script`, 89 files) added as a second row in `GIT_SOURCES.csv` at the same pinned commit; documentation index rebuilt (6,109 chunks) | |
+| 8h | README: how to add URLs, PDFs, fixlet paths and git repositories and regenerate both indexes | |
+
+Real build (2026-10-24): 16,444 rows from the three sources: 7,685 applicability, 1,232
+property and 7,527 action scripts (3.1 MB of templates; none cut). Of the scripts, 7,329
+have substitutions that all parse, 29 have one that does not, and 169 have none or could not
+be split, so carry no verdict. No credential blocked anything; 12 literal password arguments
+and 52 credential-like assignments were kept as warnings for review. 890 habits were counted
+(760 for scripts). On the team group the commonest commands are `action`, `delete` and
+`waithidden`; `waithidden` is in 96.7 percent of reference scripts.
+
+Not done, on purpose: a curated action script resource (the documentation is indexed and the
+prompts point to it, so a hand-written summary would only duplicate it and could drift), and
+any tool that runs an action script.
+
+### Source additions (2026-10-24 and 2026-10-25)
+
+Added at the user's request. **Legal sign-off was given by the user on 2026-10-25 for every
+source below, and all of them are to be treated as public.** The manifest records it in each
+`license` column. Nothing is redistributed: the downloads, converted text and indexes stay
+untracked.
+
+Documentation index (now 422 sources, 10,341 chunks, 17 MB):
+
+- Eight inspector guides (Windows, Windows Mobile, Linux, Solaris, HP-UX, AIX, Mac and
+  Session, all version 8.1) and the BigFix Relevance Guide 10.0.1, as URL sources. The
+  Relevance Guide is read from its raw GitHub URL, because the `blob` URL given returns an
+  HTML page, not the PDF. The second Custom Authoring Training Guide URL was fetched and is
+  byte-identical (same SHA-256) to the one already indexed, so it was not added twice.
+- **Every page of the HCL BigFix wiki:** 411 public pages, of which 409 are indexed (1,727
+  chunks). Two hold only images and no text ("More Examples" and "SCM Checklist Best
+  Practices and FAQs"); the build refuses a source that converts to nothing, so they are not
+  in the manifest. The wiki renders pages with script, so each manifest URL is the wiki's
+  anonymous content endpoint, addressed by wiki and page id so a rename does not break it
+  (`.../wikis/basic/anonymous/api/wiki/<wiki id>/page/<page id>/media`), and the stored file
+  name is set by hand. The page list came from the wiki's public feed
+  (`.../wikis/basic/anonymous/api/wiki/BigFix%20Wiki/feed?ps=100&page=N`); to pick up new
+  pages, list that feed again and add rows for ids not yet in the manifest.
+- Two changes to conversion came with the wiki. A page fragment's DOCTYPE declares its named
+  entities in an internal subset, which left a stray `]>` at the top of each page, so
+  `html_to_markdown` strips a leading one. A fragment also has no heading, so its chunks were
+  headed by the file name; the build now gives an HTML page with no top heading its manifest
+  title as one.
+
+Reference fixlet index (now 7 sources, 38,863 rows: 17,358 applicability, 4,312 property,
+17,193 action scripts; 130 MB):
+
+| Source | Group | License (from the repository) | `.bes` files |
+|---|---|---|---|
+| bigfix/Site_Rapid_Response | reference | Apache-2.0 | 10 |
+| bigfix/CommunityContent | reference | CC BY-SA 4.0 (ShareAlike: nothing is redistributed here) | 9,721 |
+| bigfix/content | reference | no license file found (sign-off accepted by the user) | 13 |
+| Jwalker107/BigFix | reference | MIT, the user's own | 25 |
+| bigfix/bigfix-splunk-integration | not added | Apache-2.0 | 0 |
+| bigfix/restapi-examples | not added | Apache-2.0 | 0 |
+
+The last two hold no `.bes` files, so there is nothing for this index to read; their
+markdown (2 and 37 files) could go to the documentation index instead. `Jwalker107/BigFix`
+repeats content that is also in the team group; whether it belongs in `team` is open.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -756,7 +843,7 @@ the Phase 5 golden set early, because it decides whether to continue.
 2. Rebuild the reference fixlet index (Phase 6) from the sources you list: the
    steps for each kind of source are in [reference-fixlets.md](reference-fixlets.md).
    Point `BIGFIX_FIXLET_INDEX` at `corpus/index/fixlets.sqlite`.
-3. Phases 0 to 4 and Phase 6 steps 6a to 6e are done. Continue with Phase 5b
+3. Phases 0 to 4, 6 and 8 are done. Continue with Phase 5b
    (scoring answers with and without retrieval, holding out each question's own
    source with `BIGFIX_FIXLET_HOLDOUT`), which wants more questions first, especially
    session relevance. The tools it drives are `search_relevance_docs` and

@@ -5,7 +5,7 @@ Windows applicability sets". Nothing is summarized or guessed by a model, so eve
 claim has its numbers and its example ids, and the same input always gives the same
 output.
 
-Four kinds of pattern are counted, for each (group, role, platform):
+Five kinds of pattern are counted, for each (group, role, platform):
 
   line     a relevance line, normalized (lower case, spaces collapsed, string literals
            kept). Counted once per item however often the item repeats it.
@@ -37,17 +37,25 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from tools.ingest import actiontemplate
 from tools.ingest.fixletindex import ClauseRow, ConventionRow
 
 MIN_FILES = 5
 # applicability sets repeat a few guards, so a habit shows in a tenth of them; properties
 # are far more varied (the commonest shape is about 2 percent), so they get a lower bar
-MIN_SHARE = {"applicability": 0.10, "property": 0.01}
+MIN_SHARE = {"applicability": 0.10, "property": 0.01, "actionscript": 0.05}
 TOP_PER_KIND = 50
 PATTERN_CHARS = 300
 EXAMPLES = 3
 
-KINDS = ("line", "conjunct", "opening", "shape")
+KINDS = ("line", "conjunct", "command", "opening", "shape")
+# which patterns are counted for which role: an `and` part means something in relevance,
+# the command word that opens a line means something in an action script
+KINDS_BY_ROLE = {
+    "applicability": ("line", "conjunct", "opening", "shape"),
+    "property": ("line", "conjunct", "opening", "shape"),
+    "actionscript": ("line", "command", "opening", "shape"),
+}
 PLATFORM_ALL = "all"
 PLATFORM_NONE = "none"
 PLATFORM_MULTI = "multi"
@@ -74,6 +82,8 @@ _PLATFORMS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 _STRING = re.compile(r'"[^"\n]*"')
 _NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)*(?![\w.])")
+_URL = re.compile(r"https?://[^\s\"'<>]+")
+_HASH = re.compile(r"\b[0-9a-f]{32,}\b")
 _SPACES = re.compile(r"\s+")
 
 
@@ -113,7 +123,8 @@ def normalize(line: str) -> str:
 
 def shape(line: str) -> str:
     """A normalized line with its string literals and numbers replaced by placeholders."""
-    return _NUMBER.sub("<n>", _STRING.sub('"<str>"', normalize(line)))
+    text = _STRING.sub('"<str>"', normalize(line))
+    return _NUMBER.sub("<n>", _HASH.sub("<hash>", _URL.sub("<url>", text)))
 
 
 def _top_level_parts(text: str) -> list[str]:
@@ -159,6 +170,8 @@ def conjuncts(line: str) -> list[str]:
 
 
 def _patterns(kind: str, lines: Sequence[str]) -> set[str]:
+    if kind == "command":
+        return actiontemplate.commands(list(lines))
     if not lines:
         return set()
     if kind == "line":
@@ -172,10 +185,12 @@ def _patterns(kind: str, lines: Sequence[str]) -> set[str]:
     return {pattern for pattern in found if pattern}
 
 
-def _count(units: Sequence[_Unit]) -> list[tuple[str, Counter, dict[str, list[str]]]]:
+def _count(
+    units: Sequence[_Unit], kinds: Sequence[str]
+) -> list[tuple[str, Counter, dict[str, list[str]]]]:
     """Per kind: how many distinct items hold each pattern, and which items (first few)."""
     out = []
-    for kind in KINDS:
+    for kind in kinds:
         counts: Counter = Counter()
         examples: dict[str, list[str]] = {}
         for unit in units:
@@ -221,7 +236,7 @@ def mine(
     rows: list[ConventionRow] = []
     for (group, role, platform), members in sorted(cells.items()):
         total = len(members)
-        for kind, counts, examples in _count(list(members.values())):
+        for kind, counts, examples in _count(list(members.values()), KINDS_BY_ROLE[role]):
             kept = [
                 (pattern, files)
                 for pattern, files in counts.items()

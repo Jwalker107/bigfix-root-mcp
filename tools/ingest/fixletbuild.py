@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from tools.ingest import (
+    actiontemplate,
     bes,
     fetch,
     fixletconventions,
@@ -83,6 +84,8 @@ class Assembled:
     exclusions: list[Exclusion] = field(default_factory=list)
     warnings: Counter = field(default_factory=Counter)
     dropped: int = 0
+    # (source, file, field) of each shared purpose field already scanned and reported
+    scanned: set = field(default_factory=set)
 
 
 def _groups(item: bes.Item) -> list[tuple[str, list[bes.Statement]]]:
@@ -106,6 +109,32 @@ def _scan(
     return blocking, [f for f in findings if f.severity == scan.WARN]
 
 
+def _withhold(
+    purpose: dict[str, str],
+    path: str,
+    source_id: str,
+    allowed: set[tuple[str, str, str]],
+    result: "Assembled",
+) -> list[str]:
+    """Blank each purpose field a credential was found in, and say which."""
+    excluded = []
+    for where, text in purpose.items():
+        # an item's title and description are shared by all its rows (each property, each
+        # action); find and report what is in them once, not once per row
+        key = (source_id, path, where)
+        first = key not in result.scanned
+        result.scanned.add(key)
+        blocking, warnings = _scan(source_id, path, text, allowed)
+        if first:
+            result.warnings.update(f.rule for f in warnings)
+        if blocking:
+            excluded.append(where)
+            purpose[where] = ""
+            if first:
+                result.exclusions += [Exclusion(source_id, path, where, f.rule) for f in blocking]
+    return excluded
+
+
 def _clause(
     item: bes.Item,
     role: str,
@@ -124,7 +153,7 @@ def _clause(
     purpose = {
         "title": item.title,
         "description": item.description,
-        "action": SCRIPT_SEPARATOR.join(item.actions)[:ACTION_EXCERPT_CHARS],
+        "action": SCRIPT_SEPARATOR.join(a.script for a in item.actions)[:ACTION_EXCERPT_CHARS],
     }
     # the clause itself first: a credential in it cannot be indexed in any form
     body = "\n".join([name, *lines])
@@ -137,14 +166,7 @@ def _clause(
             for f in blocking
         ]
         return None
-    excluded = []
-    for where, text in purpose.items():
-        blocking, warnings = _scan(source_id, item.path, text, allowed)
-        result.warnings.update(f.rule for f in warnings)
-        if blocking:
-            excluded.append(where)
-            purpose[where] = ""
-            result.exclusions += [Exclusion(source_id, item.path, where, f.rule) for f in blocking]
+    excluded = _withhold(purpose, item.path, source_id, allowed, result)
     verdicts = [verdict.analyze_query(line, "client") for line in lines]
     failed = next((v for v in verdicts if not v.parsed), None)
     return fixletindex.ClauseRow(
@@ -159,11 +181,73 @@ def _clause(
         description=purpose["description"],
         action_excerpt=purpose["action"],
         relevance=lines,
+        item_id=bes.item_id(item),
         platform=platform,
         parses=failed is None,
         parse_error=(failed.parse_error or failed.crashed)[:PARSE_ERROR_CHARS] if failed else "",
         unknown_inspectors=tuple(sorted({n for v in verdicts for n in v.unknown_inspectors})),
         excluded=tuple(excluded),
+    )
+
+
+def _action_row(
+    item: bes.Item,
+    action: bes.Action,
+    source_id: str,
+    allowed: set[tuple[str, str, str]],
+    result: Assembled,
+    item_platform: str,
+) -> fixletindex.ClauseRow | None:
+    """One action script as a template, or None when a credential was found in it."""
+    blocking, warnings = _scan(source_id, item.path, action.script, allowed)
+    result.warnings.update(f.rule for f in warnings)
+    if blocking:
+        result.dropped += 1
+        result.exclusions += [
+            Exclusion(source_id, item.path, "script", f.rule, dropped_clause=True) for f in blocking
+        ]
+        return None
+    template = actiontemplate.parse(action.script)
+    verdicts = [verdict.analyze_query(expr, "client") for expr in template.substitutions]
+    failed = next((v for v in verdicts if not v.parsed), None)
+    # only substitutions can be analysed; a script with none, or one that could not be
+    # split, has no verdict rather than a made-up one
+    judged = bool(verdicts) and not template.ambiguous
+    mime = action.mime_type.rsplit("/", 1)[-1].lower()
+    lines = actiontemplate.command_lines(template.text)
+    # synthetic lines so that habits about the action as a whole are counted too
+    lines.append(f"@mime {mime or 'none'}")
+    lines.append(f"@success {action.success_criteria.lower() or 'none'}")
+    if template.parameters:
+        lines.append("@parameterized")
+    purpose = {"title": item.title, "description": item.description}
+    excluded = _withhold(purpose, item.path, source_id, allowed, result)
+    statement = bes.Statement("actionscript", action.script, name=action.action_id or action.kind)
+    return fixletindex.ClauseRow(
+        source_id=source_id,
+        path=item.path,
+        file_name=PurePosixPath(item.path).stem,
+        content_id=bes.content_id(item.kind, item.title, "actionscript", [statement]),
+        item_kind=item.kind,
+        role="actionscript",
+        property_name="",
+        title=purpose["title"],
+        description=purpose["description"],
+        action_excerpt="",
+        relevance=tuple(lines),
+        item_id=bes.item_id(item),
+        platform=item_platform,
+        parses=(failed is None) if judged else None,
+        parse_error=(failed.parse_error or failed.crashed)[:PARSE_ERROR_CHARS] if failed else "",
+        unknown_inspectors=tuple(sorted({n for v in verdicts for n in v.unknown_inspectors})),
+        excluded=tuple(excluded),
+        action_id=action.action_id or action.kind,
+        mime_type=action.mime_type,
+        success_criteria=action.success_criteria,
+        template=template.text,
+        substitutions=template.substitutions,
+        parameters=template.parameters,
+        script_truncated=action.truncated,
     )
 
 
@@ -216,6 +300,10 @@ def assemble(
                 )
                 if clause is not None:
                     result.data.clauses.append(clause)
+            for action in item.actions:
+                row = _action_row(item, action, record["source_id"], allowed, result, item_platform)
+                if row is not None:
+                    result.data.clauses.append(row)
     result.data.conventions = fixletconventions.mine(
         result.data.clauses, groups, min_files=min_files, min_share=min_share
     )
@@ -240,13 +328,14 @@ def format_report(built: Assembled) -> str:
     for rule, count in sorted(built.warnings.items()):
         lines.append(f"  warning kept: {rule} x{count}")
     for e in built.exclusions:
-        what = "clause dropped" if e.dropped_clause else f"{e.field} left out"
+        what = f"{e.field} dropped" if e.dropped_clause else f"{e.field} left out"
         lines.append(f"  {e.source_id}: {e.path}: {what} ({e.rule})")
     return "\n".join(lines) + "\n"
 
 
-# the pattern kind that says most about each role: guards for applicability, shapes for properties
-SHOWN_KIND = {"applicability": "conjunct", "property": "shape"}
+# the pattern kind that says most about each role: guards for applicability, shapes for
+# properties, the commands an action script uses
+SHOWN_KIND = {"applicability": "conjunct", "property": "shape", "actionscript": "command"}
 
 
 def format_conventions(data: fixletindex.FixletIndexData, top: int) -> str:

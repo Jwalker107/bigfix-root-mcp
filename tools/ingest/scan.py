@@ -45,6 +45,24 @@ _RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
         BLOCK,
         re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     ),
+    # a user name and password written into a URL: the shape action scripts and download
+    # lines most often hold a real credential in
+    ("url-credentials", BLOCK, re.compile(r"\bhttps?://[^/\s:@\"']+:[^/\s@\"']{3,}@")),
+    (
+        "authorization-header",
+        BLOCK,
+        re.compile(
+            r"\bauthorization\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{16,}", re.IGNORECASE
+        ),
+    ),
+    (
+        "password-argument",
+        WARN,
+        re.compile(
+            r"(?:--password|-password|/password)(?:\s+|[=:])(?![<{$%*\"'\s])\S{4,}",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "credential-assignment",
         WARN,

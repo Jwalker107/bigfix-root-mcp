@@ -46,6 +46,11 @@ def read_tree(tmp_path, files):
     return read
 
 
+def rel(built):
+    """The relevance rows only: every fixlet here also has an action script row."""
+    return [c for c in built.data.clauses if c.role != "actionscript"]
+
+
 def build(tmp_path, files, allowed=None):
     return fixletbuild.assemble([read_tree(tmp_path, files)], allowed)
 
@@ -56,7 +61,7 @@ class TestAssemble:
             tmp_path,
             {"foo.bes": document(fixlet(relevance=("windows of operating system", "true")))},
         )
-        (clause,) = built.data.clauses
+        (clause,) = rel(built)
         assert clause.role == "applicability"
         assert clause.relevance == ("windows of operating system", "true")
         assert clause.file_name == "foo"
@@ -69,7 +74,7 @@ class TestAssemble:
             "d.bes": document(analysis(properties=(("Free", "free space of drive"), ("Used", "1"))))
         }
         built = build(tmp_path, files)
-        roles = sorted((c.role, c.property_name) for c in built.data.clauses)
+        roles = sorted((c.role, c.property_name) for c in rel(built))
         assert roles == [("applicability", ""), ("property", "Free"), ("property", "Used")]
 
     def test_the_analyzer_verdict_is_recorded(self, tmp_path):
@@ -80,7 +85,7 @@ class TestAssemble:
                 "bad.bes": document(fixlet("Bad", ("this is not (relevance",))),
             },
         )
-        by_title = {c.title: c for c in built.data.clauses}
+        by_title = {c.title: c for c in rel(built)}
         assert by_title["Good"].parses is True
         assert by_title["Bad"].parses is False
         assert by_title["Bad"].parse_error
@@ -89,7 +94,7 @@ class TestAssemble:
         built = build(tmp_path, {"foo.bes": document(fixlet())})
         item = bes.extract(tmp_path / "tree").items[0]
         expected = bes.content_id(item.kind, item.title, "applicability", item.statements)
-        assert built.data.clauses[0].content_id == expected
+        assert rel(built)[0].content_id == expected
 
     def test_each_read_is_recorded_with_when_and_what(self, tmp_path):
         built = build(tmp_path, {"foo.bes": document(fixlet())})
@@ -101,7 +106,7 @@ class TestAssemble:
 
     def test_an_unreadable_source_adds_nothing(self):
         built = fixletbuild.assemble([fixlets.Read("x", error="boom")])
-        assert built.data.clauses == []
+        assert rel(built) == []
         assert built.data.reads == []
 
 
@@ -110,20 +115,20 @@ class TestSecrets:
         built = build(
             tmp_path, {"a.bes": document(fixlet(relevance=(f'name of it = "{AWS_KEY}"',)))}
         )
-        assert built.data.clauses == []
+        assert rel(built) == []
         assert built.dropped == 1
         assert built.exclusions[0].dropped_clause
 
     def test_a_credential_in_the_action_script_leaves_only_the_excerpt_out(self, tmp_path):
         built = build(tmp_path, {"a.bes": document(fixlet(script=f"set key {AWS_KEY}"))})
-        (clause,) = built.data.clauses
+        (clause,) = rel(built)
         assert clause.action_excerpt == ""
         assert clause.excluded == ("action",)
         assert clause.title == "Install Foo"  # the rest of the clause stays
 
     def test_a_credential_in_the_description_leaves_only_it_out(self, tmp_path):
         built = build(tmp_path, {"a.bes": document(fixlet(description=f"key {AWS_KEY}"))})
-        (clause,) = built.data.clauses
+        (clause,) = rel(built)
         assert (clause.description, clause.excluded) == ("", ("description",))
         assert clause.action_excerpt == "run foo"
 
@@ -142,7 +147,7 @@ class TestSecrets:
 
     def test_a_warning_is_counted_and_the_text_kept(self, tmp_path):
         built = build(tmp_path, {"a.bes": document(fixlet(description=f"ask {EMAIL}"))})
-        (clause,) = built.data.clauses
+        (clause,) = rel(built)
         assert EMAIL in clause.description
         assert built.warnings["email-address"] == 1
 
@@ -175,7 +180,9 @@ class TestIndex:
         meta = dict(sqlite3.connect(index_path).execute("SELECT key, value FROM meta"))
         assert meta["schema_version"] == str(fixletindex.SCHEMA_VERSION)
         assert "do not distribute" in meta["confidential"]
-        assert meta["clause_count"] == "3"
+        # foo.bes: its applicability and its action script; d.bes: the analysis applicability and
+        # its property
+        assert meta["clause_count"] == "4"
         assert meta["analyzer_version"]
 
     def test_user_version_is_set_for_the_reader_to_check(self, index_path):
@@ -187,7 +194,7 @@ class TestIndex:
             "SELECT title FROM clauses WHERE id IN"
             " (SELECT rowid FROM clauses_fts WHERE clauses_fts MATCH 'deploy')"
         )
-        assert [r[0] for r in rows] == ["Install Foo"]
+        assert {r[0] for r in rows} == {"Install Foo"}
 
     def test_the_relevance_is_searchable_as_text(self, index_path):
         rows = sqlite3.connect(index_path).execute(

@@ -37,7 +37,7 @@ from bigfix_root_mcp import knowledge
 INDEX_ENV = "BIGFIX_FIXLET_INDEX"
 HOLDOUT_ENV = "BIGFIX_FIXLET_HOLDOUT"
 # the index schema this code reads (tools/ingest/fixletindex.py writes it)
-SUPPORTED_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSION = 3
 
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 15
@@ -53,6 +53,10 @@ MAX_HOLDOUT = 500
 # the same item often sits in two copies of a tree; fetch extra rows so collapsing them
 # still leaves `limit` distinct results
 OVERFETCH = 4
+# an action script template is long; a search hit shows the start and says how much more
+TEMPLATE_CHARS = 3000
+SUBSTITUTIONS_SHOWN = 8
+SUBSTITUTION_CHARS = 300
 
 # bm25 column weights, in the order of clauses_fts: what an item is called and what it
 # says it does outrank the same word somewhere in its script or relevance
@@ -65,12 +69,17 @@ _WEIGHTS = (
     2.0,
 )  # title, file_name, description, action, property, relevance
 
-_ROLES = ("applicability", "property")
+_ROLES = ("applicability", "property", "actionscript")
 _PLATFORMS = ("windows", "mac", "unix")
 _GROUP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ID_RE = re.compile(r"^[0-9a-f]{12}$")
-# the pattern kind that says most about each role, as in the build's own listing
-_CONVENTION_KIND = {"applicability": "conjunct", "property": "shape"}
+# the pattern kinds that say most about each role: guards for applicability, shapes for
+# properties, and for an action script the commands it uses and how it opens
+_CONVENTION_KINDS = {
+    "applicability": ("conjunct",),
+    "property": ("shape",),
+    "actionscript": ("command", "opening"),
+}
 _REQUIRED_TABLES = frozenset({"meta", "reads", "clauses", "conventions", "clauses_fts"})
 
 _NOTE = (
@@ -79,12 +88,18 @@ _NOTE = (
     "rather than copying it, and confirm what you write with analyze_relevance and a "
     "bounded query. `platform` is a heuristic from the item's own operating-system test "
     "(windows, mac, unix, multi, or none); a platform filter keeps that platform plus "
-    "'multi' and 'none'. `parses: false` means the offline analyzer could not parse it, "
-    "so do not copy its syntax. `left_out` names a field withheld because a scan found a "
+    "'multi' and 'none'. `item` is the id of the whole fixlet, task or analysis, shared by "
+    "its relevance and its action scripts. `parses: false` means the offline analyzer "
+    "could not parse it, so do not copy its syntax. `left_out` names a field withheld "
+    "because a scan found a "
     "credential in it. `conventions` are counted habits (`items` of `of` held the "
     "pattern): they show what was written, mistakes included, and a rule the user or the "
     "house conventions state outranks them. Each group is counted on its own and groups "
-    "are never pooled; a group that is not your team's is a reference, not your rule."
+    "are never pooled; a group that is not your team's is a reference, not your rule. "
+    "An `actionscript` result is a template to read, never to run: `{<relevance>}` stands "
+    "for a relevance substitution (listed in `substitutions`), `{{` and `}}` are literal "
+    "braces, and `parses` is the analyzer's verdict on those substitutions only (absent "
+    "when there are none). `template_chars_total` says how much was cut."
 )
 
 _HOW_TO_ENABLE = (
@@ -95,8 +110,10 @@ _HOW_TO_ENABLE = (
 
 _CLAUSE_SQL = (
     "SELECT c.source_id, r.source_group, c.path, c.file_name, c.content_id, c.role, "
-    "c.platform, c.property_name, c.title, c.description, c.action_excerpt, c.relevance, "
-    "c.parses, c.parse_error, c.unknown_inspectors, c.excluded "
+    "c.platform, c.item_id, c.action_id, c.mime_type, c.success_criteria, c.template, "
+    "c.substitutions, c.parameters, c.script_truncated, c.property_name, c.title, "
+    "c.description, c.action_excerpt, c.relevance, c.parses, c.parse_error, "
+    "c.unknown_inspectors, c.excluded "
     "FROM clauses_fts JOIN clauses AS c ON c.id = clauses_fts.rowid "
     "JOIN reads AS r ON r.source_id = c.source_id "
     "WHERE clauses_fts MATCH ?{extra} "
@@ -190,8 +207,13 @@ def _filters(
         where += " AND r.source_group = ?"
         params.append(group)
     if holdout:
-        where += f" AND c.content_id NOT IN ({', '.join('?' * len(holdout))})"
-        params.extend(holdout)
+        marks = ", ".join("?" * len(holdout))
+        # an item is held out whole: the clause named, and every other row of its item
+        where += (
+            f" AND c.content_id NOT IN ({marks}) AND c.item_id NOT IN"
+            f" (SELECT item_id FROM clauses WHERE content_id IN ({marks}))"
+        )
+        params.extend(holdout * 2)
     return where, params
 
 
@@ -219,24 +241,54 @@ def _distinct(rows: list[sqlite3.Row], limit: int) -> tuple[list[sqlite3.Row], d
     return kept, copies
 
 
+def _action_fields(row: sqlite3.Row) -> dict:
+    """What an action script row adds: the template, bounded, and what it substitutes."""
+    template, cut = knowledge.clip(row["template"], TEMPLATE_CHARS)
+    out: dict = {"template": template, "action": row["action_id"]}
+    if cut:
+        out["template_chars_total"] = len(row["template"])
+    if row["mime_type"]:
+        out["mime_type"] = row["mime_type"]
+    if row["success_criteria"]:
+        out["success_criteria"] = row["success_criteria"]
+    substitutions = json.loads(row["substitutions"])
+    if substitutions:
+        out["substitutions"] = [
+            knowledge.clip(text, SUBSTITUTION_CHARS)[0]
+            for text in substitutions[:SUBSTITUTIONS_SHOWN]
+        ]
+        if len(substitutions) > SUBSTITUTIONS_SHOWN:
+            out["substitutions_total"] = len(substitutions)
+    parameters = json.loads(row["parameters"])
+    if parameters:
+        out["parameters"] = parameters
+    if row["script_truncated"]:
+        out["script_cut_when_indexed"] = True
+    return out
+
+
 def _clause_result(row: sqlite3.Row, copies: int = 1) -> dict:
     lines = json.loads(row["relevance"])
-    out = {
+    out: dict = {
         "id": row["content_id"],
+        "item": row["item_id"],
         "role": row["role"],
         "platform": row["platform"],
         "group": row["source_group"],
         "source": row["source_id"],
         "path": row["path"],
         "title": row["title"],
-        "relevance": [
-            knowledge.clip(line, RELEVANCE_LINE_CHARS)[0] for line in lines[:RELEVANCE_LINES]
-        ],
     }
+    if row["role"] == "actionscript":
+        out.update(_action_fields(row))
+    else:
+        out["relevance"] = [
+            knowledge.clip(line, RELEVANCE_LINE_CHARS)[0] for line in lines[:RELEVANCE_LINES]
+        ]
+        if len(lines) > RELEVANCE_LINES:
+            out["relevance_lines_total"] = len(lines)
     if copies > 1:
         out["copies"] = copies
-    if len(lines) > RELEVANCE_LINES:
-        out["relevance_lines_total"] = len(lines)
     if row["property_name"]:
         out["property"] = row["property_name"]
     if row["description"]:
@@ -300,12 +352,14 @@ def _conventions(
     out = []
     for group in sorted(groups):
         for role in sorted(roles):
-            rows = connection.execute(
-                "SELECT source_group, role, platform, kind, pattern, files, total, share"
-                " FROM conventions WHERE source_group = ? AND role = ? AND platform = ?"
-                " AND kind = ? ORDER BY files DESC, pattern LIMIT ?",
-                (group, role, platform or "all", _CONVENTION_KIND[role], CONVENTION_LIMIT),
-            ).fetchall()
+            rows = []
+            for kind in _CONVENTION_KINDS[role]:
+                rows += connection.execute(
+                    "SELECT source_group, role, platform, kind, pattern, files, total, share"
+                    " FROM conventions WHERE source_group = ? AND role = ? AND platform = ?"
+                    " AND kind = ? ORDER BY files DESC, pattern LIMIT ?",
+                    (group, role, platform or "all", kind, CONVENTION_LIMIT),
+                ).fetchall()
             out += [
                 {
                     "group": row["source_group"],

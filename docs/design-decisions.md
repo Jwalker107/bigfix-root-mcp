@@ -114,6 +114,37 @@ authoring resources. Choices worth keeping:
 - **Returning results to the model was confirmed by the user (2026-10-22).** The
   content goes into the context of whatever model the MCP client uses.
 
+## Action scripts in the reference index: templates, never run
+
+The reference fixlet index also keeps each action script (plan Phase 8). Choices worth
+keeping:
+
+- **A script is stored as a template, not as raw text only.** Almost every script carries
+  `{relevance}` substitutions, so a template replaces each with `{<relevance>}` and keeps
+  the expressions separately, where the analyzer can check them. Scripts that differ only
+  in what they substitute then look alike, which is what makes counted habits meaningful.
+  Brace escapes (`{{`, `}}`) are kept as written so a copy stays valid, and a script with an
+  unclosed substitution is stored unchanged and marked, never repaired by guesswork.
+- **`createfile` bodies are searchable but are not habits.** The text of a file a script
+  writes is in the template, so a search for a PowerShell cmdlet finds it, but only the
+  script's own command lines are counted, so body text is never mistaken for a convention.
+- **Scripts share the relevance table and its machinery.** A new `actionscript` role, an
+  `item` id shared by an item's rows, and the same group, platform, hold-out and secret
+  scan. Holding out an item removes all of its rows, so a script cannot leak the answer to
+  a question written from its relevance.
+- **Scripts are scanned at full length, and a hit drops the whole row.** Scripts are where
+  credentials and internal hosts sit. Three rules were added for them: a password in a
+  URL and an authorization header (both blocking) and a literal password argument
+  (a warning).
+- **A hit is bounded and labeled as something to read, never to run.** The template is cut
+  at 3,000 characters with the total stated, and the response and the tool description say
+  it is never to be run. No tool here executes an action script, and the prompts say a
+  script can be checked but never claimed to work.
+- **Three prompts, not one.** `write_relevance`, `write_actionscript` and `write_fixlet`
+  are separate because the checks differ (relevance can be evaluated; a script cannot be
+  run), and `write_fixlet` joins them and validates the XML offline. It never imports or
+  deploys.
+
 ## Which writes, and why only these
 
 Three write tools exist: `stop_action`, `set_dashboard_variable`,

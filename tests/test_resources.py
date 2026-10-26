@@ -23,6 +23,8 @@ EXPECTED_PROMPTS = {
     "find_stale_agents",
     "troubleshoot_relevance",
     "write_relevance",
+    "write_actionscript",
+    "write_fixlet",
 }
 
 

@@ -28,6 +28,15 @@ Build from scratch (all from the repo root):
 
 Add `--dry-run` to the first two to see what they would do.
 
+`MANIFEST.csv` also lists every page of the HCL BigFix wiki (`wiki-*` ids). Those URLs are
+the wiki's anonymous content endpoint, addressed by page id, and the page list comes from
+its public feed; see "Source additions" in the plan for how to list it again.
+
+`GIT_SOURCES.csv` may hold two rows for one repository at the same commit with different
+subpaths and ids: the pinned `developer.bigfix.com` checkout is read for both its
+relevance documentation (`site/pages/relevance`) and its action script documentation
+(`site/pages/action-script`).
+
 Measure and select, once the index is built:
 
     python -m tools.eval.analyze_examples     # offline analyzer pass over the examples

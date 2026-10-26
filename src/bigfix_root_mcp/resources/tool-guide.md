@@ -34,14 +34,17 @@ and `site_path_candidates` lists the options.
 | --- | --- |
 | The name and signature of an inspector | `search_inspectors` |
 | Documentation and a worked example for something you are about to write | `search_relevance_docs` |
-| An existing fixlet or analysis that does something similar, and the habits across them | `search_reference_fixlets` |
+| An existing fixlet, analysis or action script that does something similar, and the habits across them | `search_reference_fixlets` |
 | To check an expression without running it | `analyze_relevance` |
 | To run it, bounded | `session_relevance_query` or `client_query` |
 
 The `write_relevance` prompt runs this sequence for you: look up, check names,
 draft, analyze, evaluate bounded, and report only what was verified. The
 `bigfix://relevance/authoring-guide` and `bigfix://relevance/client-idioms`
-resources hold the rules and patterns it points to.
+resources hold the rules and patterns it points to. `write_actionscript` does the same for
+an action script, and `write_fixlet` joins relevance and an action script into one Fixlet or
+Task and validates its XML offline with `validate_bes_xml`. None of them can run an action
+script, so none may say one works.
 
 `search_relevance_docs` searches a local snapshot of documentation, so it never
 touches BigFix. It returns `chunks` (documentation) and `examples` (a query and
@@ -64,8 +67,12 @@ both or do not say, so an `unknown` item may still be the wrong dialect for you.
 
 `search_reference_fixlets` searches the team's own existing content (needs a local
 index; it answers `available: false` with how to enable it when none is configured).
-Use it for applicability and property relevance. Adapt a match; never copy it. Each
-result names its `group` and the time its source was read. `conventions` are counted
+Use it for applicability and property relevance and, with `role='actionscript'`, for
+action scripts. A script comes back as a template to read and never to run:
+`{<relevance>}` marks each relevance substitution, which is listed in `substitutions`,
+and `{{` and `}}` are literal braces. Results with the same `item` belong to one fixlet.
+Adapt a match; never copy it. Each result names its `group` and the time its source was
+read. `conventions` are counted
 habits (`items` of `of` held the pattern) and show what was written, mistakes
 included: a rule the user or the house conventions state outranks them, and a group
 that is not the team's is a reference, not a rule. Treat all of it as company

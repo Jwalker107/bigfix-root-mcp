@@ -47,6 +47,40 @@ its own and never pooled, so a large public repository cannot be mistaken for yo
 team's conventions. Put your own sources in one group (`team` here) and other
 people's content in another (`reference`). A source with no group counts alone.
 
+## What the index holds
+
+For each fixlet, task and analysis the build keeps three kinds of row:
+
+| Row (`role`) | What it is |
+| --- | --- |
+| `applicability` | A Fixlet or Task's relevance, all its lines together |
+| `property` | One Analysis property, with its name |
+| `actionscript` | One action of a Fixlet or Task (its `DefaultAction` or each `Action`), stored as a **template** |
+
+A template is the script as written, with each relevance substitution `{...}` replaced by
+the marker `{<relevance>}`; the relevance of each substitution is stored separately, in
+order, and checked with the analyzer like any other relevance. `{{` and `}}` are literal
+braces and are kept as written. A script also records its MIME type, its success criteria
+option and the `parameter` names it declares. A script with a substitution that cannot be
+split cleanly is marked ambiguous: it is stored unchanged, with no substitutions and no
+verdict, rather than guessed at.
+
+The rows of one item share an `item` id, so a search result for an action script can be
+matched with the relevance it belongs to, and holding an item out of an evaluation removes
+all of it. The text of a `createfile` or `appendfile` block is searchable, but it is not
+counted as a habit: only the script's own command lines are.
+
+Habits are counted for scripts too, per group and platform: which commands scripts use,
+how they open, common lines and shapes (URLs, checksums, numbers and substitutions are
+replaced by placeholders so scripts that differ only in values look alike), and the
+success criteria and MIME type of the action as a whole.
+
+Scripts are the most likely place for a credential, so each is scanned at full length. A
+script with a high-confidence credential is left out entirely and reported as
+`script dropped`; the item's relevance stays. The scan also blocks a password written into
+a URL and an `Authorization: Bearer` or `Basic` header, and warns about a literal
+`--password` argument.
+
 ## Step 1: list your sources
 
 Copy the template and edit the copy:
@@ -185,7 +219,8 @@ real build:
 | `clauses` | How many pieces of relevance were found, split into applicability and property |
 | `parse cleanly with the analyzer` | Normally close to all of them |
 | `mention an inspector the analyzer lacks` | A few is normal (newer inspectors than the analyzer knows) |
-| `left out for a credential` | Anything here names the file, the field and the rule, never the text. Read it. |
+| `actionscript` under `clauses` | One per action script found. A fixlet with several actions gives several. |
+| `left out for a credential` | Anything here names the file, the field and the rule, never the text. A `script dropped` line means a whole action script was left out. Read it. |
 | `warning kept` | Credential-like text that was kept, for example `password = value` in a script. Review it. |
 
 To build from a subset of the list, repeat `--source`:
@@ -204,8 +239,11 @@ Your numbers will differ.
 ### If something in a clause looks like a credential
 
 - A credential in the relevance itself: the whole clause is left out.
-- A credential in a title, description or action script: only that field is left out,
-  and the result later says `left_out`.
+- A credential in a title or description: only that field is left out, and the result
+  later says `left_out`.
+- A credential anywhere in an action script: the script's own row is left out
+  (`script dropped`), and so is the short script excerpt kept with the item's relevance
+  (`left_out` says `action`). The item's relevance stays.
 - A false positive can be allowed in `corpus/SCAN_ALLOW.csv` (columns `source_id`,
   `path`, `rule`, `reason`; `*` matches any path). A reason is required. This file is
   shared with the documentation build.
@@ -271,6 +309,7 @@ results, and the same ids the question collector writes.
 | A git read fails with an authentication error | Git could not sign in without a prompt | Set up a credential helper or an SSH agent; never put a secret in the URL |
 | `a password in the URL is not accepted` | The URL contains a password or token | Remove it and use a credential helper |
 | `not built: a source could not be read` | One source failed; no index is written | Fix that source, or leave it out with `--source` |
+| `script dropped (url-credentials)` and similar | A script holds a password in a URL, an authorization header or another credential shape | Remove the credential from the source (use a parameter), or allow a known false positive in `corpus/SCAN_ALLOW.csv` |
 | `nothing to index` | No `.bes` content with relevance was found | Check the path and `subpath` |
 | `available: false`, "no reference fixlet index is configured" | `BIGFIX_FIXLET_INDEX` is not set in the server's environment | Step 5 |
 | `available: false`, "no index file at ..." | The path in the variable is wrong | Correct it |

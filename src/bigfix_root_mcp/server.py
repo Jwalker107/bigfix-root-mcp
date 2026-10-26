@@ -465,8 +465,9 @@ def search_reference_fixlets(
         str | None,
         Field(
             description=(
-                "'applicability' (a Fixlet or Task's relevance, all lines together) or "
-                "'property' (an Analysis property). Default: both."
+                "'applicability' (a Fixlet or Task's relevance, all lines together), "
+                "'property' (an Analysis property) or 'actionscript' (an action's script "
+                "as a template). Default: all three."
             )
         ),
     ] = None,
@@ -499,9 +500,11 @@ def search_reference_fixlets(
 ) -> dict:
     """Find existing fixlets and analyses that do something similar (offline; no server call).
 
-    Use it before writing applicability or property relevance, to see how similar
-    content was written and which habits recur, then adapt what you find and check it
-    with analyze_relevance and a bounded query. Never copy a match as the answer.
+    Use it before writing applicability or property relevance, or an action script, to
+    see how similar content was written and which habits recur, then adapt what you
+    find and check it with analyze_relevance and a bounded query. Never copy a match as
+    the answer. With role='actionscript' a hit is a template to read and never to run;
+    `{<relevance>}` marks each relevance substitution, which is listed separately.
 
     Returns `results` (title, relevance lines, what it does, the analyzer's verdict,
     the group and source), best match first, and `conventions`: counted habits per

@@ -23,7 +23,7 @@ The capabilities of this MCP server are intentionally limited, where as the offi
 | `analyze_relevance` | Statically analyze a relevance expression offline - parse, types, dialect, unknown inspectors with suggestions, complexity. Never evaluates it. |
 | `search_inspectors` | Fuzzy-search the offline inspector reference by name or phrase. |
 | `search_relevance_docs` | Search a local, offline index of relevance documentation and worked examples (needs `BIGFIX_KNOWLEDGE_INDEX`; answers `available: false` with how to enable it when unset). Never contacts BigFix. |
-| `search_reference_fixlets` | Search a local index of your own existing fixlets and analyses (built from a directory or a git repository), with the habits counted across them (needs `BIGFIX_FIXLET_INDEX`; answers `available: false` when unset; how to build it: [docs/reference-fixlets.md](docs/reference-fixlets.md)). Company content: read-only, bounded, and every result names its source and when it was read. Never contacts BigFix. |
+| `search_reference_fixlets` | Search a local index of your own existing fixlets and analyses (built from a directory or a git repository: relevance, analysis properties and action script templates), with the habits counted across them (needs `BIGFIX_FIXLET_INDEX`; answers `available: false` when unset; how to build it: [docs/reference-fixlets.md](docs/reference-fixlets.md)). Company content: read-only, bounded, and every result names its source and when it was read. Never contacts BigFix. |
 | `client_query_submit` | Submit a client fast query, return its `query_id` immediately. |
 | `client_query_results` | Fetch current (cumulative) results for a query ID; safe to call repeatedly. |
 | `client_query` | Submit + poll in one call with progress notifications; stops on expected count reached, results stable, or timeout. |
@@ -108,7 +108,7 @@ pull on demand rather than repeating it in every tool description:
 | `bigfix://relevance/reference/session-relevance` | Session relevance language reference (from bigfix-relevance-analyzer). |
 
 Prompts: `diagnose_computer`, `patch_status`, `find_stale_agents`,
-`troubleshoot_relevance`, `write_relevance`.
+`troubleshoot_relevance`, `write_relevance`, `write_actionscript`, `write_fixlet`.
 
 `write_relevance(goal, dialect)` walks a model through writing relevance: look it
 up with `search_relevance_docs` (and `search_reference_fixlets`, for similar existing
@@ -118,6 +118,16 @@ verified. If `BIGFIX_RELEVANCE_CONVENTIONS` names a markdown file, its text is
 added as house conventions (how your team treats proxy agents, guard idioms, and
 so on); a starting point is in
 [docs/relevance-conventions.example.md](docs/relevance-conventions.example.md).
+
+`write_actionscript(goal, platform)` does the same for an action script: look up the
+commands in the indexed action script documentation, find a similar script as a template
+with `search_reference_fixlets` (`role='actionscript'`), draft, check every `{...}`
+relevance substitution with `analyze_relevance`, and report what was checked. A script
+can be checked but not run, so it never says one works, never invents a download URL or
+checksum, and never puts a credential in a script. `write_fixlet(goal, platform)` joins
+the two: applicability relevance and an action script that agree with each other,
+assembled as BES XML and checked offline with `validate_bes_xml`. It does not import or
+deploy anything.
 
 Relevance errors also carry a cause hint: the server recognizes the common
 failure shapes (a non-existent limiting operator, client relevance in a
@@ -138,6 +148,155 @@ termination heuristics (reported in `stop_reason`):
 
 For long waits, use `client_query_submit` then `client_query_results`
 repeatedly instead of a single blocking call.
+
+## The knowledge base: adding sources and regenerating the indexes
+
+The server can search two local indexes. Both are optional, offline and read-only, and
+both are built by tools in this repository, not downloaded.
+
+| Index | Built from | Tool that reads it | Variable | File |
+| --- | --- | --- | --- | --- |
+| **Documentation** | Web pages, PDFs and git repositories of public documentation | `search_relevance_docs` | `BIGFIX_KNOWLEDGE_INDEX` | `corpus/index/relevance.sqlite` |
+| **Reference fixlets** | `.bes` files in a directory or a git repository: your own existing content | `search_reference_fixlets` | `BIGFIX_FIXLET_INDEX` | `corpus/index/fixlets.sqlite` |
+
+Everything the tools download, convert or build lives under `corpus/` and is ignored by git
+(see [corpus/README.md](corpus/README.md)). Public availability is not permission to
+redistribute: only add sources you are cleared to use, and note that the reference
+fixlet index holds your own company content, so never commit, package or share it.
+
+Run every command from the repository root. `uv sync` installs the development group,
+which includes `pypdf`, needed only to read PDFs. Use `uv run python -m ...`, or plain
+`python -m ...` with the project environment active. Every step has a `--dry-run` that
+changes nothing: use it first.
+
+### Add to the documentation index
+
+| To add | Edit | Then run |
+| --- | --- | --- |
+| A web page (a URL) | a row in `corpus/MANIFEST.csv` | `fetch`, then `build` |
+| A PDF (a URL) | a row in `corpus/MANIFEST.csv` | `fetch`, then `build` |
+| A git repository of documentation | a row in `corpus/GIT_SOURCES.csv` | `gitsource`, then `build` |
+
+**A URL (web page or PDF).** Add one row to `corpus/MANIFEST.csv`. The columns are
+`id, path, source_url, title, retrieved_on, license, bigfix_version, dialect, sha256, notes`:
+
+```
+my-guide,,https://example.com/docs/my-guide.pdf,My Guide,,Public; use covered by sign-off,11.0,client,,added 2026-10-24
+```
+
+- `id` is a short name (letters, digits, `.`, `_`, `-`). `dialect` is `session`, `client`
+  or `both`; blank means unknown. Leave `path`, `retrieved_on` and `sha256` blank: the
+  fetch step fills them in and records the file's SHA-256, so a later change upstream
+  shows as a manifest diff.
+- Supported types are `.pdf`, `.html`/`.htm` and `.md`/`.markdown`/`.txt`. The stored file
+  name takes its extension from the URL. A page whose URL has no `.html` extension would be
+  stored as `.bin` and skipped, so put `my-page.html` in the `path` column yourself.
+- Fetching honours `robots.txt`, waits between requests to one host and caps response
+  size. It only fetches `http` and `https`.
+
+```
+python -m tools.ingest.fetch --dry-run     # download and report, write nothing
+python -m tools.ingest.fetch               # fetch, record hashes in MANIFEST.csv
+python -m tools.ingest.fetch --only my-guide
+```
+
+**A git repository.** Add one row to `corpus/GIT_SOURCES.csv`. The columns are
+`id, repo_url, branch, commit, subpath, license, pinned_on, notes`. The `commit` must be a
+full 40-character SHA and `subpath` must name the folder to read, so every build uses the
+same bytes. Find the commit with `git ls-remote <repo_url> <branch>`:
+
+```
+my-docs,https://github.com/example/docs.git,main,0123456789abcdef0123456789abcdef01234567,site/pages,Apache-2.0,2026-10-24,pinned today
+```
+
+To read two folders of one repository, add two rows with different ids and the same commit.
+To update a source, change its `commit` and run the steps again.
+
+```
+python -m tools.ingest.gitsource --dry-run
+python -m tools.ingest.gitsource
+```
+
+**Regenerate the documentation index.** The index is rebuilt from scratch from every row, so
+this is also how you pick up a change or remove a source (delete its row first):
+
+```
+python -m tools.ingest.build --dry-run     # converts and scans, writes nothing
+python -m tools.ingest.build               # writes corpus/index/relevance.sqlite
+```
+
+The report lists each source's files, chunks and examples. It also scans for credentials and
+refuses to write the index if it finds a high-confidence one (exit code 3); a known false
+positive can be allowed in `corpus/SCAN_ALLOW.csv` with a reason. Point
+`BIGFIX_KNOWLEDGE_INDEX` at the file. It is read on every call, so a rebuilt index is used
+without restarting the server.
+
+### Add to the reference fixlet index
+
+| To add | Edit | Then run |
+| --- | --- | --- |
+| A directory of `.bes` files (a fixlet path) | a row in `corpus/fixlet-sources.csv` | `fixlets`, then `fixletbuild` |
+| A git repository of `.bes` files | a row in `corpus/fixlet-sources.csv` | `fixlets`, then `fixletbuild` |
+
+The source list is `corpus/fixlet-sources.csv`, which is ignored by git because a company
+path or an internal repository URL is itself internal. Copy the template and edit it:
+
+```
+cp docs/fixlet-sources.example.csv corpus/fixlet-sources.csv
+```
+
+The columns are `id, kind, location, branch, commit, subpath, group, notes`:
+
+```
+team-fixlets,dir,C:/path/to/bes-files,,,,team,a working tree
+team-repo,git,https://git.example.com/org/repo.git,main,,content/fixlets,team,internal repository
+public-repo,git,https://github.com/example/public-content,,,,reference,a public repository
+```
+
+- A **directory** is read in place and never modified. Every `.bes` file under it is found,
+  in any letter case. Links and junctions are not followed.
+- A **git repository** is checked out under `corpus/raw/fixlets/<id>/`. A blank `commit` means
+  the branch tip at the moment it is read; the commit is recorded. Put a full SHA there to
+  read exactly the same content again. Use `https` (git must be able to sign in without a
+  prompt; a password in a URL is refused) or, with `--allow-scheme ssh`, an `ssh` URL.
+- `group` decides what is counted together. The habits the index reports are counted per
+  group and never pooled, so give your own sources one group and other people's content
+  another. A source with no group counts alone.
+
+```
+python -m tools.ingest.fixlets --source team-fixlets --dry-run   # check one source
+python -m tools.ingest.fixlets --source team-fixlets             # read it, record when
+python -m tools.ingest.fixletbuild --all --dry-run               # analyse every listed source
+python -m tools.ingest.fixletbuild --all                         # write corpus/index/fixlets.sqlite
+```
+
+For a one-off, skip the list: `python -m tools.ingest.fixlets --dir PATH` or
+`--git URL [--branch B] [--commit SHA] [--subpath P]`.
+
+The index is built from **all** the sources you name at once and rebuilt from scratch, so
+always build with `--all` (or repeat `--source`). It holds three kinds of row: applicability
+relevance of fixlets and tasks, analysis properties, and **action scripts**, each stored as a
+template with its relevance substitutions listed separately. It also counts the habits that
+recur, per group and platform. A credential found in relevance, a description or a script is
+left out and reported by file and rule, never by value. Point `BIGFIX_FIXLET_INDEX` at the
+file. The step-by-step guide, with a worked example for each kind of source, is
+[docs/reference-fixlets.md](docs/reference-fixlets.md).
+
+### Check and keep it current
+
+- Ask for something the sources cover. `search_relevance_docs` answers with `chunks` and
+  `examples`; `search_reference_fixlets` answers with `results` and `conventions`. Either
+  answers `available: false` with the reason and how to enable it when its variable is unset,
+  its file is missing, or the index was built by a different version. A version mismatch means
+  rebuild.
+- Rebuild whenever a source changes. Every real read of a reference source appends to
+  `corpus/index/fixlet-reads.jsonl`: when it was read (UTC), the commit (git), a fingerprint of
+  the files and counts.
+- To judge answers fairly, set `BIGFIX_FIXLET_HOLDOUT` to the item ids a question came from;
+  they are removed, with their action scripts, from every search.
+- The write prompts that use these indexes are `write_relevance`, `write_actionscript` and
+  `write_fixlet` (above). Team rules belong in `BIGFIX_RELEVANCE_CONVENTIONS`, not in the
+  indexes.
 
 ## Configuration
 

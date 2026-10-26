@@ -135,7 +135,8 @@ class TestRoleThresholds:
 
     def test_a_mapping_overrides_only_the_roles_it_names(self):
         shares = fixletconventions.resolve_min_share({"applicability": 0.5})
-        assert shares == {"applicability": 0.5, "property": fixletconventions.MIN_SHARE["property"]}
+        expected = {**fixletconventions.MIN_SHARE, "applicability": 0.5}
+        assert shares == expected
 
     def test_the_defaults_are_a_copy_not_the_shared_table(self):
         fixletconventions.resolve_min_share(None)["property"] = 9
@@ -254,7 +255,7 @@ class TestBuildIntegration:
     def test_a_property_with_no_platform_test_takes_its_analysis_platform(self, tmp_path):
         files = {"d.bes": document(analysis_xml(("Free", "free space of drive")))}
         built = fixletbuild.assemble([self.read(tmp_path, "t", files)])
-        by_role = {c.role: c.platform for c in built.data.clauses}
+        by_role = {c.role: c.platform for c in built.data.clauses if c.role != "actionscript"}
         assert by_role == {"applicability": "windows", "property": "windows"}
 
     def test_a_property_with_its_own_platform_test_keeps_it(self, tmp_path):
