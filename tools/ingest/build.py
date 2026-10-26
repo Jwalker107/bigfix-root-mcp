@@ -29,6 +29,7 @@ Stdout carries the report; diagnostics go to stderr via logging.
 import argparse
 import hashlib
 import logging
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -230,6 +231,21 @@ def _to_markdown(target: Path, data: bytes) -> str:
     )
 
 
+_H1 = re.compile(r"^# \S", re.MULTILINE)
+
+
+def _titled(markdown: str, title: str, suffix: str) -> str:
+    """Give an HTML page with no top heading its manifest title as one.
+
+    A page fragment (the wiki's content pages are one) has no <title> or <h1>, so its
+    chunks would otherwise be headed by the file name. PDFs are left as converted.
+    """
+    title = title.strip()
+    if suffix.lower() not in (".html", ".htm") or not title or _H1.search(markdown):
+        return markdown
+    return f"# {title}\n\n{markdown}"
+
+
 def _load_url_source(row: dict[str, str], raw_dir: Path, md_dir: Path, *, dry_run: bool) -> _Loaded:
     source_id = row["id"].strip()
     expected = row.get("sha256", "").strip().lower()
@@ -272,6 +288,7 @@ def _load_url_source(row: dict[str, str], raw_dir: Path, md_dir: Path, *, dry_ru
         ) from err
     if not markdown.strip():
         raise SourceProblem(STATUS_ERROR, "conversion produced no text")
+    markdown = _titled(markdown, row.get("title", ""), target.suffix)
     document = Document(f"{source_id}.md", markdown)
     if not dry_run:
         fetch.atomic_write(md_dir / document.path, markdown.encode("utf-8"))

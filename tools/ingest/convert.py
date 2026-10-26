@@ -137,8 +137,17 @@ class _Converter(HTMLParser):
                 self.parts.append(collapsed)
 
 
+# A leading <!DOCTYPE ...> with an internal subset (the wiki's content pages declare the
+# usual named entities that way). HTMLParser ends a declaration at the first `>`, which is
+# inside the subset, and would leave the rest of it behind as stray text.
+_DOCTYPE_WITH_SUBSET = re.compile(
+    r"^\s*(?:<\?xml[^>]*\?>\s*)?<!DOCTYPE[^\[>]*\[.*?\]\s*>", re.IGNORECASE | re.DOTALL
+)
+
+
 def html_to_markdown(source: str) -> str:
     """Convert an HTML document to markdown. Never raises on malformed HTML."""
+    source = _DOCTYPE_WITH_SUBSET.sub("", source, count=1)
     scoped = bool(re.search(r"<(?:main|article)\b", source, re.IGNORECASE))
     converter = _Converter(scoped=scoped)
     converter.feed(source)
