@@ -88,32 +88,45 @@ def build_target_xml(
     raise ValueError("Exactly one targeting mode must be provided.")
 
 
-def build_client_query_xml(query_text: str, target_xml: str) -> str:
+def build_client_query_xml(
+    query_text: str, target_xml: str, *, use_client_context: bool = False
+) -> str:
     """Build the BESAPI ClientQuery XML payload.
 
     query_text is escaped with xml.sax.saxutils.escape rather than CDATA
     wrapping: always correct, no "]]>" edge case.
+
+    use_client_context adds <UseClientContext>true</UseClientContext>, which
+    makes the agent evaluate the query in agent (client) context, where
+    inspectors such as `registration server` exist; without it they fail
+    with "No inspector context.". The schema orders it after QueryText and
+    before Target, and the element is left out when not wanted.
     """
     if not query_text or not query_text.strip():
         raise ValueError("query_text must be a non-empty client relevance string.")
+    context = "<UseClientContext>true</UseClientContext>" if use_client_context else ""
     return (
         "<BESAPI>"
         "<ClientQuery>"
         "<ApplicabilityRelevance>true</ApplicabilityRelevance>"
         f"<QueryText>{xml.sax.saxutils.escape(query_text)}</QueryText>"
+        f"{context}"
         f"<Target>{target_xml}</Target>"
         "</ClientQuery>"
         "</BESAPI>"
     )
 
 
-def submit_client_query(conn, query_text: str, target_xml: str) -> int:
+def submit_client_query(
+    conn, query_text: str, target_xml: str, *, use_client_context: bool = False
+) -> int:
     """POST a client query; return its integer query ID."""
     native = getattr(conn, "client_query_submit", None)
-    if native is not None:
+    # a native besapi method takes no client context option, so it is used only without one
+    if native is not None and not use_client_context:
         return int(native(query_text, target_xml))
 
-    payload = build_client_query_xml(query_text, target_xml)
+    payload = build_client_query_xml(query_text, target_xml, use_client_context=use_client_context)
     result = _check_status(conn.post(conn.url("clientquery"), data=payload))
     try:
         return int(result.besobj.ClientQuery.ID)

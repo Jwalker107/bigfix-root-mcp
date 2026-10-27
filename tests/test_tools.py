@@ -198,6 +198,18 @@ class TestClientQueryTools:
         )
         assert result.data == {"query_id": 42, "expected_count": 2}
 
+    async def test_submit_sends_client_context_only_when_asked(self, fake_conn):
+        fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
+        fake_conn.post_responses.append(FakeRESTResult(text=SUBMIT_RESPONSE_XML))
+        await call("client_query_submit", {"query_text": "x", "target_computer_ids": [10]})
+        await call(
+            "client_query_submit",
+            {"query_text": "x", "target_computer_ids": [10], "use_client_context": True},
+        )
+        posted = [c[2] for c in fake_conn.calls if c[0] == "post"]
+        assert "UseClientContext" not in posted[0]
+        assert "<UseClientContext>true</UseClientContext>" in posted[1]
+
     async def test_submit_requires_exactly_one_target(self, fake_conn):
         with pytest.raises(ToolError, match="Exactly one targeting mode"):
             await call("client_query_submit", {"query_text": "computer name"})
@@ -535,6 +547,10 @@ class TestToolSurface:
             # offline static analysis - no server contact at all
             "analyze_relevance",
             "search_inspectors",
+            # offline search of the local relevance knowledge index (read-only)
+            "search_relevance_docs",
+            # offline search of the reference fixlet index (read-only, company content)
+            "search_reference_fixlets",
             "client_query_submit",
             "client_query_results",
             "client_query",

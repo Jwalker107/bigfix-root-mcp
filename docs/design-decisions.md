@@ -24,6 +24,132 @@ the tool description says so rather than hiding it.
 API, which makes a generic escape hatch safe and removes the pressure to add
 one-off tools for every endpoint.
 
+## Relevance knowledge search: always registered, never an error when absent
+
+`search_relevance_docs` reads a local SQLite index built from documentation
+(`tools/ingest`, see `docs/knowledge-retrieval-plan.md`). Choices that are easy
+to "improve" into problems:
+
+- **Registered whether or not an index exists.** The write tools are gated on
+  registration because they change what the server can *do*. This tool adds no
+  capability: it reads a file. An absent tool cannot tell an administrator how
+  to turn it on; a registered one answers `available: false` with the reason and
+  `how_to_enable`. That is an answer, not an error, because the index is
+  optional and most installs will not have one.
+- **The index is opened read-only, per call.** `mode=ro` plus `query_only`, and
+  the path comes from `BIGFIX_KNOWLEDGE_INDEX`, never from the caller, so a
+  client cannot point the server at an arbitrary file. Opening per call means a
+  rebuilt index is picked up without a restart, and the connection is closed
+  before a build tries to replace the file.
+- **User text never reaches FTS syntax.** A query is reduced to words and quoted
+  phrases and every term is passed as a quoted string, so `NEAR(`, `col:`, `*`
+  and `OR` in a query are just words. This is tested with hostile inputs.
+- **The text is data.** Every response says retrieved text is not instructions,
+  because a documentation page, or someone who edited one, can say anything.
+- **Dialect `unknown` matches either dialect.** Some sources (the generated
+  inspector reference) do not say whether an inspector is session or client.
+  Dropping them from a filtered search would hide most of the inspectors, and
+  guessing would be a lie, so they are included and labelled.
+- **Examples carry documented answers, not verified ones.** The documentation
+  says what an example returns; nothing here ran it against a server.
+- **The analyzer's verdict labels examples; it does not rank or hide them.**
+  About one bare-fence example in four does not parse, so `parses: false` is
+  shown with the reason instead of dropping the example. A failing example can
+  also be the point (one that documents an error), and an unknown inspector is as
+  likely to be newer documentation than a mistake, so the verdict is evidence
+  for the reader, not a filter.
+- **A dialect is inferred only when the analyzer is definite.** `both`, a
+  conflict between its two signals, or a query that does not parse all leave an
+  example `unknown`, and a dialect the source states is never overridden. An
+  inferred label says so (`dialect_source: analyzer`). Guessing more would make
+  the dialect filter confidently wrong.
+- **The index is rebuilt, not migrated.** It is derived data that rebuilds in
+  seconds, so a schema change bumps the version, and a server and an index that
+  disagree say so and ask for a rebuild instead of guessing.
+
+## The write_relevance prompt: generic by default, team rules by configuration
+
+The prompt encodes an order of work (look up, check names, draft, analyze,
+evaluate bounded, report only what was verified) and sends a model to the
+authoring resources. Choices worth keeping:
+
+- **Team conventions are configuration, not shipped text.** How a team treats
+  proxy agents, or which guard idiom it uses, is not in any public documentation
+  and differs between teams. A file named by `BIGFIX_RELEVANCE_CONVENTIONS` is
+  added to the prompt as instructions; the shipped prompt contains none, and a test
+  checks that. The path is the operator's, never a caller's, and the file is read
+  on every call and size-capped. `corpus/conventions.md` is tracked as a starting point
+  for customers, but it is still only configuration: the server reads it when, and only
+  when, `BIGFIX_RELEVANCE_CONVENTIONS` names it. HTML comments in the file are removed
+  before it is sent, so a note to the people editing it (that it is an editable default)
+  never reaches the model.
+- **A conventions file that cannot be read is said so in the prompt.** A rule that
+  silently stopped applying is worse than a visible problem.
+- **Examples in the shipped resources are checked by the analyzer.** The same
+  measurements that found about one bare-fence example in four failing to parse
+  upstream are why a test parses every `relevance` snippet in the authoring
+  resources and requires no unknown inspectors. Guidance that fails its own
+  checker would teach exactly what it warns against.
+- **The prompt cannot name a tool that does not exist.** A test compares the tools
+  and resources it mentions with the registered ones.
+- **Evaluation is bounded and read-only.** One named computer, or a lab target,
+  never `target_all` unless asked; and nothing is described as working unless it
+  was run.
+
+## Reference fixlet search: company content, kept apart and bounded
+
+`search_reference_fixlets` reads a local index built from existing `.bes` files
+(`tools/ingest/fixlet*.py`, plan Phase 6). The content is the team's own, so:
+
+- **A separate index file and its own variable**, never merged into the
+  documentation index. Neither index is shipped: each user builds both from the
+  source lists (decided 2026-10-26). This one also says so in its meta table.
+- **The scan path is an operator command, not a tool argument.** A tool that read a
+  directory a model chose could be pointed anywhere by injected text.
+- **Groups are counted on their own.** A public repository must not be reported as a
+  team's habits, so conventions are per group and the response lists the groups.
+  Counted conventions are observations of what was written, mistakes included; a rule
+  the user or `BIGFIX_RELEVANCE_CONVENTIONS` states outranks them.
+- **Every result names its source and read time**, so an answer traces to one read.
+  A source's own location (a local path or an internal URL) is never returned.
+- **The hold-out is an environment variable, not an argument**, and a malformed one
+  makes the index unavailable instead of being ignored: an evaluation that silently
+  stopped holding out would score the index on its own answers.
+- **Returning results to the model was confirmed by the user (2026-10-22).** The
+  content goes into the context of whatever model the MCP client uses.
+
+## Action scripts in the reference index: templates, never run
+
+The reference fixlet index also keeps each action script (plan Phase 8). Choices worth
+keeping:
+
+- **A script is stored as a template, not as raw text only.** Almost every script carries
+  `{relevance}` substitutions, so a template replaces each with `{<relevance>}` and keeps
+  the expressions separately, where the analyzer can check them. Scripts that differ only
+  in what they substitute then look alike, which is what makes counted habits meaningful.
+  Brace escapes are kept as written so a copy stays valid (outside a substitution `{{` is one
+  `{` and a single `}` is already literal; inside one, `}}` is one `}`), and a script with an
+  unclosed substitution is stored unchanged and marked, never repaired by guesswork.
+- **`createfile` bodies are searchable but are not habits.** The text of a file a script
+  writes is in the template, so a search for a PowerShell cmdlet finds it, but only the
+  script's own command lines are counted, so body text is never mistaken for a convention.
+- **Scripts share the relevance table and its machinery.** A new `actionscript` role, an
+  `item` id shared by an item's rows, and the same group, platform, hold-out and secret
+  scan. Holding out an item removes all of its rows, so a script cannot leak the answer to
+  a question written from its relevance.
+- **Scripts are scanned at full length, and a hit drops the whole row.** Scripts are where
+  credentials and internal hosts sit. Three rules were added for them: a password in a
+  URL and an authorization header (both blocking) and a literal password argument
+  (a warning).
+- **A hit is bounded and labeled as something to read, never to run.** The template is cut
+  at 3,000 characters with the total stated, and the response and the tool description say
+  it is never to be run. No tool here executes an action script, and the prompts say a
+  script can be checked but never claimed to work.
+- **Three prompts, not one.** `write_relevance`, `write_actionscript` and `write_fixlet`
+  are separate because the checks differ (relevance can be evaluated; a script cannot be
+  run), and `write_fixlet` joins them and validates the XML offline. It never imports or
+  deploys.
+
 ## Which writes, and why only these
 
 Three write tools exist: `stop_action`, `set_dashboard_variable`,

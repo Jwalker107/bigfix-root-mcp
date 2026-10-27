@@ -8,6 +8,8 @@ from bigfix_root_mcp import server
 EXPECTED_RESOURCES = {
     "bigfix://relevance/session-cookbook",
     "bigfix://relevance/client-cookbook",
+    "bigfix://relevance/authoring-guide",
+    "bigfix://relevance/client-idioms",
     "bigfix://guide/tools",
     # served from the bigfix-relevance-analyzer package, not resources/*.md
     "bigfix://relevance/reference/dialects",
@@ -20,6 +22,9 @@ EXPECTED_PROMPTS = {
     "patch_status",
     "find_stale_agents",
     "troubleshoot_relevance",
+    "write_relevance",
+    "write_actionscript",
+    "write_fixlet",
 }
 
 
