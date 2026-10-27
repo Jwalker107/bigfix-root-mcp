@@ -21,7 +21,7 @@ def example_key(query="q", path="p.md", form="qna"):
 class Scripted:
     """Stands in for knowledge.search: returns a scripted result list per query text."""
 
-    def __init__(self, examples=None, chunks=None):
+    def __init__(self, examples=None, chunks=None) -> None:
         self.examples = examples or {}
         self.chunks = chunks or {}
         self.calls = []

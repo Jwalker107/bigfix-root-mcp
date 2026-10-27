@@ -122,14 +122,14 @@ class TestPdf:
         ]
 
         class Page:
-            def __init__(self, text):
+            def __init__(self, text) -> None:
                 self._text = text
 
             def extract_text(self):
                 return self._text
 
         class Reader:
-            def __init__(self, path):
+            def __init__(self, path) -> None:
                 self.pages = [Page(t) for t in texts]
 
         monkeypatch.setitem(sys.modules, "pypdf", types.SimpleNamespace(PdfReader=Reader))
@@ -145,14 +145,14 @@ class TestPdf:
 
     def test_pages_become_sections_and_empty_pages_are_skipped(self, monkeypatch, tmp_path):
         class Page:
-            def __init__(self, text):
+            def __init__(self, text) -> None:
                 self._text = text
 
             def extract_text(self):
                 return self._text
 
         class Reader:
-            def __init__(self, path):
+            def __init__(self, path) -> None:
                 self.pages = [Page("first page"), Page("   "), Page(None), Page("fourth page")]
 
         monkeypatch.setitem(sys.modules, "pypdf", types.SimpleNamespace(PdfReader=Reader))
@@ -168,7 +168,7 @@ class TestPdf:
 
     def test_a_pdf_with_no_text_gives_empty_output(self, monkeypatch, tmp_path):
         class Reader:
-            def __init__(self, path):
+            def __init__(self, path) -> None:
                 self.pages = []
 
         monkeypatch.setitem(sys.modules, "pypdf", types.SimpleNamespace(PdfReader=Reader))

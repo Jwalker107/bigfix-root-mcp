@@ -377,8 +377,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--min-share",
         type=float,
         default=None,
-        help="convention support as a share of the group, for every role (default: 0.10 for"
-        " applicability, 0.01 for property)",
+        help=(
+            "convention support as a share of the group, for every role (default: 0.10 for"
+            " applicability, 0.01 for property)"
+        ),
     )
     parser.add_argument(
         "--show-conventions",
