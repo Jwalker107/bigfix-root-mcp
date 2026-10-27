@@ -52,6 +52,11 @@ def test_credential_assignments_warn_but_placeholders_do_not():
     assert rules("the password inspector returns a string") == set()
 
 
+def test_an_example_key_does_not_hide_a_real_one_on_the_same_line():
+    example = assemble("AKIA", "IOSFODNN7", "EXAMPLE")
+    assert rules(f"{example} then {AWS_KEY}") == {("aws-access-key", "block")}
+
+
 def test_clean_documentation_has_no_findings():
     assert (
         rules('# bit set\n\nReturns the value of the bit.\n\nQ: bit 0 of bit set "10"\n') == set()

@@ -3,7 +3,7 @@
 import pytest
 from fastmcp import Client
 
-from bigfix_root_mcp import conventions, server
+from bigfix_root_mcp import conventions, prompts, server
 
 PROMPTS = ("write_actionscript", "write_fixlet")
 
@@ -27,6 +27,9 @@ class TestBoth:
             found = {p.name: p for p in await client.list_prompts()}
         arguments = {a.name: a.required for a in found[name].arguments}
         assert arguments == {"goal": True, "platform": False}
+
+    async def test_it_carries_the_scope_reminder(self, name):
+        assert prompts.SCOPE_REMINDER in await prompt_text(name, goal="x")
 
     async def test_it_carries_the_goal_verbatim(self, name):
         assert "uninstall Foo 2.1 quietly" in await prompt_text(

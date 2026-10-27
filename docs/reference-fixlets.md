@@ -318,8 +318,9 @@ the table at the end.
 `BIGFIX_FIXLET_HOLDOUT` takes a comma-separated list of item ids and removes those
 items from every search, so a question's own source cannot be returned as its answer.
 It is read from the environment, never from a tool argument. A malformed list makes
-the index unavailable rather than being ignored. The ids are the `id` field in
-results, and the same ids the question collector writes.
+the index unavailable rather than being ignored. An id can be the `id` field in
+results (the same id the question collector writes) or the `item` field; either one
+removes the whole item, its relevance and its action scripts.
 
 ## When something goes wrong
 

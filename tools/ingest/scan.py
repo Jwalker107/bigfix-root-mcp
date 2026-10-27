@@ -103,8 +103,8 @@ def scan_text(source_id: str, path: str, text: str) -> list[Finding]:
     findings: list[Finding] = []
     for number, line in enumerate(text.splitlines(), start=1):
         for rule, severity, pattern in _RULES:
-            match = pattern.search(line)
-            if match and "EXAMPLE" not in match.group(0):
+            # every match, not the first: an EXAMPLE key must not hide a real one after it
+            if any("EXAMPLE" not in match.group(0) for match in pattern.finditer(line)):
                 findings.append(Finding(source_id, path, number, rule, severity))
     return findings
 

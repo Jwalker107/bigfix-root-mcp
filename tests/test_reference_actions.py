@@ -164,6 +164,12 @@ class TestHoldOut:
         after = reference.search("defender exclusion")["results"]
         assert "Add Defender exclusion" not in [r["title"] for r in after]
 
+    def test_holding_out_by_the_item_field_holds_out_the_whole_item(self, index_path, monkeypatch):
+        script = reference.search("defender exclusion", role="actionscript")["results"][0]
+        monkeypatch.setenv(reference.HOLDOUT_ENV, script["item"])
+        after = reference.search("defender exclusion")["results"]
+        assert "Add Defender exclusion" not in [r["title"] for r in after]
+
     def test_other_items_are_not_held_out(self, index_path, monkeypatch):
         applicability = reference.search("defender exclusion", role="applicability")["results"][0]
         monkeypatch.setenv(reference.HOLDOUT_ENV, applicability["id"])

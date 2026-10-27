@@ -113,6 +113,15 @@ class TestUnavailable:
         monkeypatch.setenv(reference.INDEX_ENV, str(tmp_path / "absent.sqlite"))
         assert "no index file" in reference.search("x")["reason"]
 
+    def test_a_malformed_stored_field_is_an_answer_not_a_crash(self, index_path):
+        connection = sqlite3.connect(index_path)
+        connection.execute("UPDATE clauses SET relevance = 'not json'")
+        connection.commit()
+        connection.close()
+        result = reference.search("defender exclusion")
+        assert result["available"] is False
+        assert "could not be searched" in result["reason"]
+
     def test_a_file_that_is_not_an_index_is_refused(self, monkeypatch, tmp_path):
         path = tmp_path / "other.sqlite"
         sqlite3.connect(path).execute("CREATE TABLE t (a)").connection.close()

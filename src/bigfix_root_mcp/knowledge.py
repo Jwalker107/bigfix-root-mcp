@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 INDEX_ENV = "BIGFIX_KNOWLEDGE_INDEX"
@@ -140,14 +141,24 @@ def _validate(dialect: str | None, kind: str | None) -> tuple[str | None, str | 
     return parsed_dialect, parsed_kind
 
 
-def _open_index() -> tuple[sqlite3.Connection | None, dict | None]:
-    """Open the configured index read-only: (connection, None) or (None, why not)."""
-    raw = os.environ.get(INDEX_ENV, "").strip()
+def open_index(
+    env: str,
+    required_tables: frozenset[str],
+    schema_version: int,
+    label: str,
+    unavailable: Callable[[str], dict],
+) -> tuple[sqlite3.Connection | None, dict | None]:
+    """Open the index named by `env` read-only: (connection, None) or (None, why not).
+
+    Shared by this module and reference.py: `label` names the index in messages
+    ("knowledge index") and `unavailable` builds the module's own answer.
+    """
+    raw = os.environ.get(env, "").strip()
     if not raw:
-        return None, _unavailable(f"no knowledge index is configured ({INDEX_ENV} is not set)")
+        return None, unavailable(f"no {label} is configured ({env} is not set)")
     path = Path(raw).expanduser()
     if not path.is_file():
-        return None, _unavailable(f"there is no index file at {path}")
+        return None, unavailable(f"there is no index file at {path}")
     connection = None
     try:
         connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
@@ -158,18 +169,57 @@ def _open_index() -> tuple[sqlite3.Connection | None, dict | None]:
     except sqlite3.Error as err:
         if connection is not None:
             connection.close()
-        return None, _unavailable(f"{path} cannot be read as a knowledge index ({err})")
-    if not _REQUIRED_TABLES.issubset(tables):
+        return None, unavailable(f"{path} cannot be read as a {label} ({err})")
+    if not required_tables.issubset(tables):
         connection.close()
-        return None, _unavailable(f"{path} is a SQLite file but not a knowledge index")
-    if version != SUPPORTED_SCHEMA_VERSION:
+        return None, unavailable(f"{path} is a SQLite file but not a {label}")
+    if version != schema_version:
         connection.close()
-        return None, _unavailable(
+        return None, unavailable(
             f"{path} has index schema version {version}; this server reads version "
-            f"{SUPPORTED_SCHEMA_VERSION}. Rebuild the index with matching tools or "
+            f"{schema_version}. Rebuild the index with matching tools or "
             "upgrade the server"
         )
     return connection, None
+
+
+def search_failed(env: str, label: str, err: Exception) -> str:
+    """The reason for an index that opened but failed mid-search (corrupt or truncated)."""
+    path = Path(os.environ.get(env, "").strip()).expanduser()
+    return (
+        f"the {label} at {path} could not be searched ({type(err).__name__}: {err}); "
+        "it may be damaged, so rebuild it"
+    )
+
+
+def prepare_query(query: str, no_terms_hint: str) -> tuple[list[list[str]], int]:
+    """Validate a query and reduce it to at most MAX_TERMS terms: (terms, how many dropped).
+
+    Raises ValueError for an empty, over-long or termless query; `no_terms_hint`
+    finishes the termless message with an example that suits the tool.
+    """
+    if not query or not query.strip():
+        raise ValueError("query must not be empty")
+    if len(query) > MAX_QUERY_CHARS:
+        raise ValueError(
+            f"query is too long ({len(query)} characters; the limit is {MAX_QUERY_CHARS})"
+        )
+    terms = parse_query(query)
+    if not terms:
+        raise ValueError(f"query has no searchable terms; {no_terms_hint}")
+    return terms[:MAX_TERMS], max(0, len(terms) - MAX_TERMS)
+
+
+def display_terms(terms: list[list[str]]) -> list[str]:
+    """The terms as a response echoes them: a phrase in double quotes, a word bare."""
+    return [" ".join(term) if len(term) == 1 else f'"{" ".join(term)}"' for term in terms]
+
+
+def _open_index() -> tuple[sqlite3.Connection | None, dict | None]:
+    """Open the configured knowledge index read-only: (connection, None) or (None, why not)."""
+    return open_index(
+        INDEX_ENV, _REQUIRED_TABLES, SUPPORTED_SCHEMA_VERSION, "knowledge index", _unavailable
+    )
 
 
 def run_match(
@@ -282,21 +332,11 @@ def search(
     that dialect plus those marked 'both' or 'unknown'. `limit` applies to each
     list and is clamped to 1..MAX_SEARCH_LIMIT.
     """
-    if not query or not query.strip():
-        raise ValueError("query must not be empty")
-    if len(query) > MAX_QUERY_CHARS:
-        raise ValueError(
-            f"query is too long ({len(query)} characters; the limit is {MAX_QUERY_CHARS})"
-        )
+    terms, dropped = prepare_query(
+        query,
+        "use words, for example 'bes computers' or a quoted phrase such as \"files of folder\"",
+    )
     parsed_dialect, parsed_kind = _validate(dialect, kind)
-    terms = parse_query(query)
-    if not terms:
-        raise ValueError(
-            "query has no searchable terms; use words, for example 'bes computers' "
-            'or a quoted phrase such as "files of folder"'
-        )
-    dropped = max(0, len(terms) - MAX_TERMS)
-    terms = terms[:MAX_TERMS]
     limit = max(1, min(limit, MAX_SEARCH_LIMIT))
 
     connection, problem = _open_index()
@@ -306,9 +346,7 @@ def search(
         out: dict = {
             "available": True,
             "query": query,
-            "terms": [
-                " ".join(term) if len(term) == 1 else f'"{" ".join(term)}"' for term in terms
-            ],
+            "terms": display_terms(terms),
             "match": {},
         }
         if dropped:
@@ -328,6 +366,9 @@ def search(
             cited.update(row["source_id"] for row in rows)
         out["index"] = _provenance(connection, cited)
         out["note"] = _NOTE
+    except (sqlite3.Error, json.JSONDecodeError) as err:
+        return _unavailable(search_failed(INDEX_ENV, "knowledge index", err))
+    else:
         return out
     finally:
         connection.close()

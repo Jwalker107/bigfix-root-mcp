@@ -231,6 +231,7 @@ def register_prompts(mcp) -> None:
             "exists, that paths and permissions are right); the parameters and "
             "placeholders the user must fill in; and your assumptions. Do not describe a "
             "script as working.\n\n"
+            f"{SCOPE_REMINDER}"
             f"{conventions.section()}"
         )
 
@@ -289,5 +290,6 @@ def register_prompts(mcp) -> None:
             "and what came back); for the script, which substitutions were analyzed and "
             "that the commands were NOT run; the placeholders and parameters the user must "
             "fill in; and your assumptions.\n\n"
+            f"{SCOPE_REMINDER}"
             f"{conventions.section()}"
         )

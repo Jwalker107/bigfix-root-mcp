@@ -462,6 +462,25 @@ class TestAvailability:
         assert result["available"] is False
         assert "cannot be read" in result["reason"]
 
+    def test_a_damaged_full_text_index_is_an_answer_not_a_crash(self, index_path):
+        connection = sqlite3.connect(index_path)
+        connection.execute("DELETE FROM chunks_fts_data")
+        connection.commit()
+        connection.close()
+        result = knowledge.search("shift")
+        assert result["available"] is False
+        assert "could not be searched" in result["reason"]
+        assert "rebuild" in result["reason"]
+
+    def test_a_malformed_stored_field_is_an_answer_not_a_crash(self, index_path):
+        connection = sqlite3.connect(index_path)
+        connection.execute("UPDATE examples SET answers = 'not json'")
+        connection.commit()
+        connection.close()
+        result = knowledge.search("shift", kind="example")
+        assert result["available"] is False
+        assert "JSONDecodeError" in result["reason"]
+
     def test_a_database_that_is_not_an_index(self, tmp_path, monkeypatch):
         path = tmp_path / "other.sqlite"
         connection = sqlite3.connect(path)
