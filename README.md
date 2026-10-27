@@ -174,6 +174,48 @@ which includes `pypdf`, needed only to read PDFs. Use `uv run python -m ...`, or
 `python -m ...` with the project environment active. Every step has a `--dry-run` that
 changes nothing: use it first.
 
+### Quick start: build both indexes from a fresh clone
+
+These commands build both indexes from the committed source lists (`corpus/GIT_SOURCES.csv`
+and `corpus/MANIFEST.csv`), then register the server with Claude Code. Run them from the
+root of the clone:
+
+```bash
+uv sync                                           # the dev group, including pypdf
+uv run python -m tools.ingest.gitsource           # the pinned documentation repositories
+uv run python -m tools.ingest.fetch               # the URL sources, each checked by SHA-256
+uv run python -m tools.ingest.build               # writes corpus/index/relevance.sqlite
+uv run python -m tools.ingest.fixletbuild --all   # writes corpus/index/fixlets.sqlite
+
+claude mcp add bigfix-root --scope user \
+  -e BIGFIX_KNOWLEDGE_INDEX="$PWD/corpus/index/relevance.sqlite" \
+  -e BIGFIX_FIXLET_INDEX="$PWD/corpus/index/fixlets.sqlite" \
+  -e BIGFIX_RELEVANCE_CONVENTIONS="$PWD/corpus/conventions.md" \
+  -- uv run --project "$PWD" bigfix-root-mcp
+```
+
+- Run the server from the checkout (`uv run --project`), not with `uvx bigfix-root-mcp`:
+  the published package does not have the index tools and prompts in this branch. Use
+  absolute paths; on Windows write them out in full.
+- `BIGFIX_RELEVANCE_CONVENTIONS` is optional. It loads the committed default
+  conventions, which you can edit.
+- The search tools and prompts work without a BigFix connection. The other tools also
+  need `BES_ROOT_SERVER`, `BES_USER_NAME` and `BES_PASSWORD`, or a `~/besapi.conf`
+  (see [Configuration](#configuration)).
+- `fixletbuild` does not need the downloads, so it can run while `fetch` is running.
+- `fetch` waits between requests to one host, so it is the slow step. If an upstream
+  page has changed since its hash was committed, `fetch` downloads it and records the new
+  hash in `corpus/MANIFEST.csv`, which then shows as modified in git. That is expected:
+  keep the change, or commit it to move the pin.
+
+A run on 2026-10-26 (Windows, one machine) took about 14 minutes for `fetch`, about a
+minute each for `build` and `fixletbuild`, and seconds for the rest. It gave a documentation
+index of 10,341 chunks and 1,206 examples from 422 sources (2 of the 420 URL sources had
+changed upstream), and a reference index of 22,324 rows from `bigfix/CommunityContent` and
+`bigfix/content`. Your own sources, and any other repositories, come from
+`corpus/local-sources.csv`, which is not in the clone; add them as described below and
+build again.
+
 ### Add to the documentation index
 
 | To add | Edit | Then run |
