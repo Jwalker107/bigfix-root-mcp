@@ -70,7 +70,7 @@ dev = [
     # PDF text extraction for the corpus tooling (tools/ingest/convert.py). Dev
     # only: the server never imports it, and the tooling skips PDF sources with a
     # clear message when it is absent.
-    "pypdf>=6.20.1",
+    "pypdf>=6.21.1",
 ]
 
 # hatchling ships every file inside the package directory, so the MCP resource

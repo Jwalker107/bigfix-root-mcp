@@ -39,7 +39,10 @@ PAGES = {
         '# Strings\n\nStrings are text.\n\n{% qna %}\nQ: "a" & "b"\nA: ab\n...\n{% endqna %}\n'
     ),
     "pages/_reference/docs/bit-set.md": (
-        "# type: bit set\n\nA collection of bits.\n\n"
+        # the site's "type: <name>" level-one heading, split after the hash so the lint
+        # that flags Python type comments does not mistake this string for one
+        "#"
+        " type: bit set\n\nA collection of bits.\n\n"
         "# bit <integer> of <bit set> : boolean\n\nReturns a bit.\n\n"
         '{% qna %}\nQ: bit 0 of bit set "10"\nA: False\nI: singular boolean\n{% endqna %}\n\n'
         "# stub : integer\n\nNo documentation exists.\n"

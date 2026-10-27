@@ -302,7 +302,7 @@ class TestConventions:
 class TestWhatIsWithheld:
     def test_a_field_the_scan_blocked_is_reported_and_its_text_absent(self, index_path):
         result = reference.search("leaky")
-        (leaky,) = [r for r in result["results"] if r["title"] == "Leaky"]
+        (leaky,) = (r for r in result["results"] if r["title"] == "Leaky")
         assert leaky["left_out"] == ["action"]
         assert "action_script" not in leaky
         assert AWS_KEY not in repr(result)
